@@ -1,9 +1,14 @@
 package community.flock.wirespec.extractor.gradle
 
+import community.flock.wirespec.extractor.jar.WirespecJarPackager
 import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.api.plugins.JavaPlugin
+import org.gradle.api.publish.PublishingExtension
+import org.gradle.api.publish.maven.MavenPublication
+import org.gradle.api.publish.maven.plugins.MavenPublishPlugin
 import org.gradle.api.tasks.SourceSetContainer
+import org.gradle.jvm.tasks.Jar
 
 /**
  * Gradle entry point for the Wirespec extractor.
@@ -33,6 +38,8 @@ class WirespecExtractorPlugin : Plugin<Project> {
             extractSpring.convention(true)
             extractOpenApi.convention(true)
             extractKtor.convention(true)
+            generateJar.convention(false)
+            jarClassifier.convention("wirespec")
         }
 
         project.plugins.withType(JavaPlugin::class.java) {
@@ -54,6 +61,40 @@ class WirespecExtractorPlugin : Plugin<Project> {
 
             // Auto-wire: every `gradle build`/`gradle assemble` runs the extractor.
             project.tasks.named("assemble") { it.dependsOn(extractTask) }
+
+            // Bundle the emitted `.ws` files under a per-project package directory
+            // (from basePackage, else the project's group/name) so several such
+            // jars never collide by path on one classpath. See WirespecJarPackager.
+            val packageDir = ext.basePackage
+                .orElse(project.provider { project.group.toString().ifBlank { project.name } })
+                .map { WirespecJarPackager.packagePath(it, fallback = project.name) }
+
+            val wirespecJar = project.tasks.register("wirespecJar", Jar::class.java) { jar ->
+                jar.group = "wirespec"
+                jar.description = "Bundle extracted Wirespec .ws files into a jar."
+                jar.archiveClassifier.set(ext.jarClassifier)
+                jar.from(extractTask.flatMap { it.outputDirectory }) { spec ->
+                    spec.include("**/*.ws")
+                    spec.into(packageDir)
+                }
+                // Reproducible archive (matches WirespecJarPackager's fixed entry time intent).
+                jar.isPreserveFileTimestamps = false
+                jar.isReproducibleFileOrder = true
+            }
+
+            // Wire publishing only when the user opted in; deferred to afterEvaluate
+            // so `ext.generateJar` reflects the build script's final value and the
+            // user's publications already exist.
+            project.afterEvaluate {
+                if (ext.generateJar.getOrElse(false)) {
+                    project.tasks.named("assemble") { it.dependsOn(wirespecJar) }
+                    project.plugins.withType(MavenPublishPlugin::class.java) {
+                        project.extensions.getByType(PublishingExtension::class.java)
+                            .publications.withType(MavenPublication::class.java)
+                            .configureEach { it.artifact(wirespecJar) }
+                    }
+                }
+            }
         }
     }
 }
