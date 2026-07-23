@@ -249,10 +249,11 @@ class FixtureBuildTest {
         assertTrue(jar.isFile) { "Wirespec jar missing at ${jar.absolutePath}" }
         JarFile(jar).use { jf ->
             val entries = jf.entries().asSequence().map { it.name }.filter { it.endsWith(".ws") }.sorted().toList()
+            // jarPath is left unset here, so entries sit under the default in-jar dir: the artifactId.
             entries.shouldContainExactly(
-                "com/acme/api/AdminController.ws",
-                "com/acme/api/UserController.ws",
-                "com/acme/api/types.ws",
+                "basic-kotlin-app/AdminController.ws",
+                "basic-kotlin-app/UserController.ws",
+                "basic-kotlin-app/types.ws",
             )
         }
     }

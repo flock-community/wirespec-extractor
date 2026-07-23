@@ -60,7 +60,7 @@
                 <configuration>
                     <output>${project.build.directory}/wirespec</output>
                     <basePackage>com.acme.api</basePackage>
-                    <generateJar>true</generateJar>
+                    <jarEnabled>true</jarEnabled>
                 </configuration>
             </plugin>
         </plugins>

@@ -13,7 +13,10 @@ import org.gradle.api.provider.Property
  *     extractSpring.set(true)    // default — Spring MVC, DSL routes, messaging
  *     extractOpenApi.set(true)   // default — JAX-RS + swagger annotations
  *     extractKtor.set(true)      // default — Ktor server routing + client calls
- *     generateJar.set(true)      // default false — bundle .ws files into a jar
+ *
+ *     // Jar packaging — jarEnabled and jarPath belong together:
+ *     jarEnabled.set(true)         // default false — bundle .ws files into a jar
+ *     jarPath.set("com/acme/api")  // in-jar directory; default: the project name (artifactId)
  * }
  * ```
  */
@@ -30,6 +33,19 @@ abstract class WirespecExtractorExtension {
     /** Extract Ktor server routing trees and Ktor client request calls. Default `true`. */
     abstract val extractKtor: Property<Boolean>
 
-    /** Bundle the `.ws` files into a `wirespecJar` and add it to Maven publications. Default `false`. */
-    abstract val generateJar: Property<Boolean>
+    /**
+     * Bundle the `.ws` files into a `wirespecJar` and add it to Maven publications. Default `false`.
+     *
+     * Pairs with [jarPath]: [jarEnabled] turns jar packaging on, [jarPath] is the in-jar directory.
+     */
+    abstract val jarEnabled: Property<Boolean>
+
+    /**
+     * Directory inside the generated jar under which the `.ws` files are placed (dot- or
+     * slash-separated). Default: the project name (its artifactId). A per-jar prefix keeps
+     * `.ws` files from several published jars from colliding by path on one classpath.
+     *
+     * Pairs with [jarEnabled]; has no effect unless jar packaging is enabled.
+     */
+    abstract val jarPath: Property<String>
 }

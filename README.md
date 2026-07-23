@@ -32,9 +32,13 @@ auto-binds to `process-classes`:
         <extractSpring>true</extractSpring>
         <extractOpenApi>true</extractOpenApi>
         <extractKtor>true</extractKtor>
-        <!-- optional — bundle the .ws files into a jar and attach it under the
-             `wirespec` classifier so `mvn install`/`deploy` publishes it. -->
-        <generateJar>false</generateJar>
+        <!-- optional — jar packaging. jarEnabled and jarPath belong together:
+             jarEnabled bundles the .ws files into a jar attached under the
+             `wirespec` classifier so `mvn install`/`deploy` publishes it, and
+             jarPath is the directory inside that jar the .ws files live under
+             (default: the project artifactId). -->
+        <jarEnabled>false</jarEnabled>
+        <jarPath>${project.artifactId}</jarPath>
       </configuration>
     </plugin>
   </plugins>
@@ -50,13 +54,13 @@ mvn wirespec:extract
 
 ### Publishing the `.ws` files as a jar
 
-With `<generateJar>true</generateJar>`, the plugin also bundles the emitted
+With `<jarEnabled>true</jarEnabled>`, the plugin also bundles the emitted
 `.ws` files into `target/<finalName>-wirespec.jar` and attaches it to the
 project, so `mvn install` / `mvn deploy` publishes it alongside the main
 artifact under the `wirespec` classifier. Inside the jar the files live under a
-per-project package directory (the `basePackage`, falling back to the project's
-`groupId` when `basePackage` is unset) — e.g. `com/acme/api/UserController.ws` —
-so several such jars never collide by path when placed on one classpath.
+per-project package directory set by `jarPath` (default: the project's
+`artifactId`) — e.g. `com/acme/api/UserController.ws` — so several such jars
+never collide by path when placed on one classpath.
 
 Consume it with `<classifier>wirespec</classifier>` on the dependency.
 
@@ -113,9 +117,13 @@ wirespecExtractor {
     // extractOpenApi.set(true)   // JAX-RS resources + swagger annotations
     // extractKtor.set(true)      // Ktor server routing + client calls
 
-    // optional — bundle the .ws files into a `-wirespec`-classified jar and, when
-    // `maven-publish` is applied, add it to the project's publications. Default false.
-    // generateJar.set(true)
+    // optional — jar packaging. jarEnabled and jarPath belong together:
+    // jarEnabled bundles the .ws files into a `-wirespec`-classified jar and, when
+    // `maven-publish` is applied, adds it to the project's publications (default false);
+    // jarPath is the directory inside that jar the .ws files live under
+    // (default: the project name / artifactId).
+    // jarEnabled.set(true)
+    // jarPath.set("com/acme/api")
 }
 ```
 
@@ -161,12 +169,12 @@ writes `.ws` files into `build/wirespec/`. To trigger it directly:
 
 ### Publishing the `.ws` files as a jar
 
-Set `generateJar.set(true)` and the plugin registers a `wirespecJar` task that
+Set `jarEnabled.set(true)` and the plugin registers a `wirespecJar` task that
 bundles the emitted `.ws` files into a `-wirespec`-classified jar (built as part
 of `assemble`). When `maven-publish` is applied, the jar is added to the
 project's `MavenPublication`s, so `./gradlew publish` ships it alongside the main
-artifact. Inside the jar the files live under a per-project package directory
-(the `basePackage`, falling back to the project's `group`/name when unset) —
+artifact. Inside the jar the files live under a per-project package directory set
+by `jarPath` (default: the project name / artifactId) —
 e.g. `com/acme/api/UserController.ws` — so several such jars never collide by
 path on one classpath.
 
