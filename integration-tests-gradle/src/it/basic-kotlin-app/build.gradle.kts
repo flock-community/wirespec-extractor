@@ -19,7 +19,5 @@ kotlin {
 
 wirespecExtractor {
     basePackage.set("com.acme.api")
-    // Bundle the emitted .ws files into a `-wirespec`-classified jar. With
-    // `assemble` wired to it (afterEvaluate), `gradle assemble` builds the jar.
     generateJar.set(true)
 }

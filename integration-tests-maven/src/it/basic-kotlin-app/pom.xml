@@ -60,8 +60,6 @@
                 <configuration>
                     <output>${project.build.directory}/wirespec</output>
                     <basePackage>com.acme.api</basePackage>
-                    <!-- Bundle the .ws files into a jar and attach it under the
-                         `wirespec` classifier so install/deploy publishes it. -->
                     <generateJar>true</generateJar>
                 </configuration>
             </plugin>

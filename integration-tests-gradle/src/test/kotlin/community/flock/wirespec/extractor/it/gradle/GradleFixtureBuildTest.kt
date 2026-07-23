@@ -171,8 +171,6 @@ class GradleFixtureBuildTest {
             }
         }
 
-        // generateJar=true: `assemble` builds a `-wirespec`-classified jar under
-        // build/libs, holding every .ws file under the basePackage directory.
         val jar = File(workDir, "build/libs").listFiles()
             ?.firstOrNull { it.name.endsWith("-wirespec.jar") }
         assertTrue(jar != null && jar.isFile) { "Wirespec jar missing under ${File(workDir, "build/libs").absolutePath}" }

@@ -62,12 +62,9 @@ class WirespecExtractorPlugin : Plugin<Project> {
             // Auto-wire: every `gradle build`/`gradle assemble` runs the extractor.
             project.tasks.named("assemble") { it.dependsOn(extractTask) }
 
-            // Bundle the emitted `.ws` files under a per-project package directory
-            // (from basePackage, else the project's group/name) so several such
-            // jars never collide by path on one classpath. See WirespecJarPackager.
-            val packageDir = ext.basePackage
-                .orElse(project.provider { project.group.toString().ifBlank { project.name } })
-                .map { WirespecJarPackager.packagePath(it, fallback = project.name) }
+            val packageDir = project.provider {
+                WirespecJarPackager.packagePath(ext.basePackage.orNull, fallback = project.group.toString().ifBlank { project.name })
+            }
 
             val wirespecJar = project.tasks.register("wirespecJar", Jar::class.java) { jar ->
                 jar.group = "wirespec"
@@ -77,14 +74,10 @@ class WirespecExtractorPlugin : Plugin<Project> {
                     spec.include("**/*.ws")
                     spec.into(packageDir)
                 }
-                // Reproducible archive (matches WirespecJarPackager's fixed entry time intent).
                 jar.isPreserveFileTimestamps = false
                 jar.isReproducibleFileOrder = true
             }
 
-            // Wire publishing only when the user opted in; deferred to afterEvaluate
-            // so `ext.generateJar` reflects the build script's final value and the
-            // user's publications already exist.
             project.afterEvaluate {
                 if (ext.generateJar.getOrElse(false)) {
                     project.tasks.named("assemble") { it.dependsOn(wirespecJar) }

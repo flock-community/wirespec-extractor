@@ -245,8 +245,6 @@ class FixtureBuildTest {
             }
         }
 
-        // generateJar=true: a `-wirespec`-classified jar is built, holding every
-        // .ws file under the basePackage directory (com/acme/api/).
         val jar = File(workDir, "target/basic-kotlin-app-1.0.0-SNAPSHOT-wirespec.jar")
         assertTrue(jar.isFile) { "Wirespec jar missing at ${jar.absolutePath}" }
         JarFile(jar).use { jf ->

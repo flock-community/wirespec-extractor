@@ -41,11 +41,7 @@ class ExtractMojo : AbstractMojo() {
     @Parameter(property = "wirespec.extractKtor", defaultValue = "true")
     var extractKtor: Boolean = true
 
-    /**
-     * When `true`, bundle the emitted `.ws` files into a jar and attach it to the
-     * project under the [jarClassifier] classifier, so `mvn install`/`deploy`
-     * publishes it alongside the main artifact. Default `false`.
-     */
+    /** Bundle the `.ws` files into a jar and attach it under [jarClassifier] so install/deploy publishes it. */
     @Parameter(property = "wirespec.generateJar", defaultValue = "false")
     var generateJar: Boolean = false
 
@@ -56,7 +52,6 @@ class ExtractMojo : AbstractMojo() {
     @Parameter(defaultValue = "\${project}", readonly = true, required = true)
     lateinit var project: MavenProject
 
-    /** Injected by Maven; attaches the generated jar as a secondary artifact. */
     @Component
     private var projectHelper: MavenProjectHelper? = null
 

@@ -31,11 +31,7 @@ abstract class WirespecExtractorExtension {
     /** Extract Ktor server routing trees and Ktor client request calls. Default `true`. */
     abstract val extractKtor: Property<Boolean>
 
-    /**
-     * When `true`, bundle the emitted `.ws` files into a jar (task `wirespecJar`)
-     * and, if `maven-publish` is applied, add it to the project's publications
-     * under [jarClassifier] so `publish` ships it. Default `false`.
-     */
+    /** Bundle the `.ws` files into a `wirespecJar` and add it to Maven publications. Default `false`. */
     abstract val generateJar: Property<Boolean>
 
     /** Classifier for the bundled Wirespec jar. Default `wirespec`. */
