@@ -35,8 +35,6 @@ auto-binds to `process-classes`:
         <!-- optional — bundle the .ws files into a jar and attach it under the
              `wirespec` classifier so `mvn install`/`deploy` publishes it. -->
         <generateJar>false</generateJar>
-        <!-- optional — classifier for that jar; defaults to `wirespec`. -->
-        <jarClassifier>wirespec</jarClassifier>
       </configuration>
     </plugin>
   </plugins>
@@ -118,7 +116,6 @@ wirespecExtractor {
     // optional — bundle the .ws files into a `-wirespec`-classified jar and, when
     // `maven-publish` is applied, add it to the project's publications. Default false.
     // generateJar.set(true)
-    // jarClassifier.set("wirespec")   // classifier for that jar; default `wirespec`
 }
 ```
 

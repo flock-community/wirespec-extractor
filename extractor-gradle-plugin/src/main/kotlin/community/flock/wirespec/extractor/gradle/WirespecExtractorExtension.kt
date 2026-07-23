@@ -14,7 +14,6 @@ import org.gradle.api.provider.Property
  *     extractOpenApi.set(true)   // default — JAX-RS + swagger annotations
  *     extractKtor.set(true)      // default — Ktor server routing + client calls
  *     generateJar.set(true)      // default false — bundle .ws files into a jar
- *     jarClassifier.set("wirespec")  // default — classifier for the bundled jar
  * }
  * ```
  */
@@ -33,7 +32,4 @@ abstract class WirespecExtractorExtension {
 
     /** Bundle the `.ws` files into a `wirespecJar` and add it to Maven publications. Default `false`. */
     abstract val generateJar: Property<Boolean>
-
-    /** Classifier for the bundled Wirespec jar. Default `wirespec`. */
-    abstract val jarClassifier: Property<String>
 }

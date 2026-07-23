@@ -15,6 +15,8 @@ import org.apache.maven.project.MavenProject
 import org.apache.maven.project.MavenProjectHelper
 import java.io.File
 
+private const val WIRESPEC_CLASSIFIER = "wirespec"
+
 @Mojo(
     name = "extract",
     defaultPhase = LifecyclePhase.PROCESS_CLASSES,
@@ -41,13 +43,9 @@ class ExtractMojo : AbstractMojo() {
     @Parameter(property = "wirespec.extractKtor", defaultValue = "true")
     var extractKtor: Boolean = true
 
-    /** Bundle the `.ws` files into a jar and attach it under [jarClassifier] so install/deploy publishes it. */
+    /** Bundle the `.ws` files into a jar and attach it under the `wirespec` classifier so install/deploy publishes it. */
     @Parameter(property = "wirespec.generateJar", defaultValue = "false")
     var generateJar: Boolean = false
-
-    /** Classifier for the attached Wirespec jar. Default `wirespec`. */
-    @Parameter(property = "wirespec.jarClassifier", defaultValue = "wirespec")
-    var jarClassifier: String = "wirespec"
 
     @Parameter(defaultValue = "\${project}", readonly = true, required = true)
     lateinit var project: MavenProject
@@ -83,11 +81,11 @@ class ExtractMojo : AbstractMojo() {
 
         if (generateJar) {
             val packageDir = WirespecJarPackager.packagePath(basePackage, fallback = project.groupId)
-            val jarFile = File(project.build.directory, "${project.build.finalName}-$jarClassifier.jar")
+            val jarFile = File(project.build.directory, "${project.build.finalName}-$WIRESPEC_CLASSIFIER.jar")
             WirespecJarPackager.pack(output, packageDir, jarFile)
-            projectHelper?.attachArtifact(project, "jar", jarClassifier, jarFile)
+            projectHelper?.attachArtifact(project, "jar", WIRESPEC_CLASSIFIER, jarFile)
                 ?: log.warn("MavenProjectHelper unavailable; built ${jarFile.name} but did not attach it.")
-            log.info("Wirespec jar: ${jarFile.name} (classifier '$jarClassifier', package '$packageDir')")
+            log.info("Wirespec jar: ${jarFile.name} (package '$packageDir')")
         }
     }
 }

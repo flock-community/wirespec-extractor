@@ -39,7 +39,6 @@ class WirespecExtractorPlugin : Plugin<Project> {
             extractOpenApi.convention(true)
             extractKtor.convention(true)
             generateJar.convention(false)
-            jarClassifier.convention("wirespec")
         }
 
         project.plugins.withType(JavaPlugin::class.java) {
@@ -69,7 +68,7 @@ class WirespecExtractorPlugin : Plugin<Project> {
             val wirespecJar = project.tasks.register("wirespecJar", Jar::class.java) { jar ->
                 jar.group = "wirespec"
                 jar.description = "Bundle extracted Wirespec .ws files into a jar."
-                jar.archiveClassifier.set(ext.jarClassifier)
+                jar.archiveClassifier.set("wirespec")
                 jar.from(extractTask.flatMap { it.outputDirectory }) { spec ->
                     spec.include("**/*.ws")
                     spec.into(packageDir)
