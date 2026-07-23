@@ -1,9 +1,14 @@
 package community.flock.wirespec.extractor.gradle
 
+import community.flock.wirespec.extractor.jar.WirespecJarPackager
 import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.api.plugins.JavaPlugin
+import org.gradle.api.publish.PublishingExtension
+import org.gradle.api.publish.maven.MavenPublication
+import org.gradle.api.publish.maven.plugins.MavenPublishPlugin
 import org.gradle.api.tasks.SourceSetContainer
+import org.gradle.jvm.tasks.Jar
 
 /**
  * Gradle entry point for the Wirespec extractor.
@@ -33,6 +38,7 @@ class WirespecExtractorPlugin : Plugin<Project> {
             extractSpring.convention(true)
             extractOpenApi.convention(true)
             extractKtor.convention(true)
+            generateJar.convention(false)
         }
 
         project.plugins.withType(JavaPlugin::class.java) {
@@ -54,6 +60,33 @@ class WirespecExtractorPlugin : Plugin<Project> {
 
             // Auto-wire: every `gradle build`/`gradle assemble` runs the extractor.
             project.tasks.named("assemble") { it.dependsOn(extractTask) }
+
+            val packageDir = project.provider {
+                WirespecJarPackager.packagePath(ext.basePackage.orNull, fallback = project.group.toString().ifBlank { project.name })
+            }
+
+            val wirespecJar = project.tasks.register("wirespecJar", Jar::class.java) { jar ->
+                jar.group = "wirespec"
+                jar.description = "Bundle extracted Wirespec .ws files into a jar."
+                jar.archiveClassifier.set("wirespec")
+                jar.from(extractTask.flatMap { it.outputDirectory }) { spec ->
+                    spec.include("**/*.ws")
+                    spec.into(packageDir)
+                }
+                jar.isPreserveFileTimestamps = false
+                jar.isReproducibleFileOrder = true
+            }
+
+            project.afterEvaluate {
+                if (ext.generateJar.getOrElse(false)) {
+                    project.tasks.named("assemble") { it.dependsOn(wirespecJar) }
+                    project.plugins.withType(MavenPublishPlugin::class.java) {
+                        project.extensions.getByType(PublishingExtension::class.java)
+                            .publications.withType(MavenPublication::class.java)
+                            .configureEach { it.artifact(wirespecJar) }
+                    }
+                }
+            }
         }
     }
 }

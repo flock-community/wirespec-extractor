@@ -71,4 +71,48 @@ class WirespecExtractorPluginTest {
         val deps = assemble.taskDependencies.getDependencies(assemble).map { it.name }
         deps shouldContain "extractWirespec"
     }
+
+    @Test
+    fun `wirespecJar task is registered with the wirespec classifier by default`() {
+        val project = ProjectBuilder.builder().build()
+        project.plugins.apply("java")
+        project.plugins.apply("community.flock.wirespec.extractor")
+
+        val jar = project.tasks.findByName("wirespecJar")
+        jar.shouldNotBeNull()
+        (jar as org.gradle.jvm.tasks.Jar).archiveClassifier.get() shouldBe "wirespec"
+    }
+
+    @Test
+    fun `generateJar false does not add wirespecJar to publications`() {
+        val project = ProjectBuilder.builder().build()
+        project.plugins.apply("java")
+        project.plugins.apply("maven-publish")
+        project.plugins.apply("community.flock.wirespec.extractor")
+        project.extensions.getByType(org.gradle.api.publish.PublishingExtension::class.java)
+            .publications.create("maven", org.gradle.api.publish.maven.MavenPublication::class.java)
+
+        (project as org.gradle.api.internal.project.ProjectInternal).evaluate()
+
+        val pub = project.extensions.getByType(org.gradle.api.publish.PublishingExtension::class.java)
+            .publications.getByName("maven") as org.gradle.api.publish.maven.MavenPublication
+        pub.artifacts.none { it.classifier == "wirespec" } shouldBe true
+    }
+
+    @Test
+    fun `generateJar true attaches wirespecJar to maven publications`() {
+        val project = ProjectBuilder.builder().build()
+        project.plugins.apply("java")
+        project.plugins.apply("maven-publish")
+        project.plugins.apply("community.flock.wirespec.extractor")
+        project.extensions.getByType(WirespecExtractorExtension::class.java).generateJar.set(true)
+        project.extensions.getByType(org.gradle.api.publish.PublishingExtension::class.java)
+            .publications.create("maven", org.gradle.api.publish.maven.MavenPublication::class.java)
+
+        (project as org.gradle.api.internal.project.ProjectInternal).evaluate()
+
+        val pub = project.extensions.getByType(org.gradle.api.publish.PublishingExtension::class.java)
+            .publications.getByName("maven") as org.gradle.api.publish.maven.MavenPublication
+        pub.artifacts.map { it.classifier } shouldContain "wirespec"
+    }
 }

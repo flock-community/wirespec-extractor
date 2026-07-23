@@ -3,14 +3,19 @@ package community.flock.wirespec.extractor.maven
 import community.flock.wirespec.extractor.ExtractConfig
 import community.flock.wirespec.extractor.WirespecExtractor
 import community.flock.wirespec.extractor.WirespecExtractorException
+import community.flock.wirespec.extractor.jar.WirespecJarPackager
 import org.apache.maven.plugin.AbstractMojo
 import org.apache.maven.plugin.MojoExecutionException
+import org.apache.maven.plugins.annotations.Component
 import org.apache.maven.plugins.annotations.LifecyclePhase
 import org.apache.maven.plugins.annotations.Mojo
 import org.apache.maven.plugins.annotations.Parameter
 import org.apache.maven.plugins.annotations.ResolutionScope
 import org.apache.maven.project.MavenProject
+import org.apache.maven.project.MavenProjectHelper
 import java.io.File
+
+private const val WIRESPEC_CLASSIFIER = "wirespec"
 
 @Mojo(
     name = "extract",
@@ -38,8 +43,15 @@ class ExtractMojo : AbstractMojo() {
     @Parameter(property = "wirespec.extractKtor", defaultValue = "true")
     var extractKtor: Boolean = true
 
+    /** Bundle the `.ws` files into a jar and attach it under the `wirespec` classifier so install/deploy publishes it. */
+    @Parameter(property = "wirespec.generateJar", defaultValue = "false")
+    var generateJar: Boolean = false
+
     @Parameter(defaultValue = "\${project}", readonly = true, required = true)
     lateinit var project: MavenProject
+
+    @Component
+    private var projectHelper: MavenProjectHelper? = null
 
     override fun execute() {
         val runtimeClasspath: List<File> = try {
@@ -65,6 +77,15 @@ class ExtractMojo : AbstractMojo() {
             )
         } catch (e: WirespecExtractorException) {
             throw MojoExecutionException(e.message, e.cause)
+        }
+
+        if (generateJar) {
+            val packageDir = WirespecJarPackager.packagePath(basePackage, fallback = project.groupId)
+            val jarFile = File(project.build.directory, "${project.build.finalName}-$WIRESPEC_CLASSIFIER.jar")
+            WirespecJarPackager.pack(output, packageDir, jarFile)
+            projectHelper?.attachArtifact(project, "jar", WIRESPEC_CLASSIFIER, jarFile)
+                ?: log.warn("MavenProjectHelper unavailable; built ${jarFile.name} but did not attach it.")
+            log.info("Wirespec jar: ${jarFile.name} (package '$packageDir')")
         }
     }
 }

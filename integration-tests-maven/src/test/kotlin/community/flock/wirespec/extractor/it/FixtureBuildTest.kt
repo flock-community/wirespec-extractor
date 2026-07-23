@@ -9,6 +9,7 @@ import org.junit.jupiter.api.DynamicTest
 import org.junit.jupiter.api.TestFactory
 import java.io.File
 import java.nio.file.Path
+import java.util.jar.JarFile
 import kotlin.io.path.copyToRecursively
 import kotlin.io.path.createDirectories
 import kotlin.io.path.readText
@@ -242,6 +243,17 @@ class FixtureBuildTest {
             assertTrue(!Regex("(?m)^\\s*(type|enum|refined)\\s+$ktInternal\\b").containsMatchIn(combined)) {
                 "Kotlin coroutine type $ktInternal leaked into a .ws file:\n$combined"
             }
+        }
+
+        val jar = File(workDir, "target/basic-kotlin-app-1.0.0-SNAPSHOT-wirespec.jar")
+        assertTrue(jar.isFile) { "Wirespec jar missing at ${jar.absolutePath}" }
+        JarFile(jar).use { jf ->
+            val entries = jf.entries().asSequence().map { it.name }.filter { it.endsWith(".ws") }.sorted().toList()
+            entries.shouldContainExactly(
+                "com/acme/api/AdminController.ws",
+                "com/acme/api/UserController.ws",
+                "com/acme/api/types.ws",
+            )
         }
     }
 

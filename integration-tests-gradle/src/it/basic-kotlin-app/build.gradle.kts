@@ -19,4 +19,5 @@ kotlin {
 
 wirespecExtractor {
     basePackage.set("com.acme.api")
+    generateJar.set(true)
 }
