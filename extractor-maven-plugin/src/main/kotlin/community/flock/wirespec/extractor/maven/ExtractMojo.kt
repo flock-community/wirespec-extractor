@@ -43,9 +43,21 @@ class ExtractMojo : AbstractMojo() {
     @Parameter(property = "wirespec.extractKtor", defaultValue = "true")
     var extractKtor: Boolean = true
 
-    /** Bundle the `.ws` files into a jar and attach it under the `wirespec` classifier so install/deploy publishes it. */
-    @Parameter(property = "wirespec.generateJar", defaultValue = "false")
-    var generateJar: Boolean = false
+    /**
+     * Bundle the `.ws` files into a jar and attach it under the `wirespec` classifier so install/deploy
+     * publishes it. Pairs with [jarPath]: this switch turns jar packaging on, [jarPath] is the in-jar directory.
+     */
+    @Parameter(property = "wirespec.jarEnabled", defaultValue = "false")
+    var jarEnabled: Boolean = false
+
+    /**
+     * Directory inside the generated jar under which the `.ws` files are placed (dot- or
+     * slash-separated). Default: the project artifactId. A per-jar prefix keeps `.ws` files from
+     * several published jars from colliding by path on one classpath. Pairs with [jarEnabled]; has
+     * no effect unless jar packaging is enabled.
+     */
+    @Parameter(property = "wirespec.jarPath", defaultValue = "\${project.artifactId}")
+    var jarPath: String? = null
 
     @Parameter(defaultValue = "\${project}", readonly = true, required = true)
     lateinit var project: MavenProject
@@ -79,8 +91,8 @@ class ExtractMojo : AbstractMojo() {
             throw MojoExecutionException(e.message, e.cause)
         }
 
-        if (generateJar) {
-            val packageDir = WirespecJarPackager.packagePath(basePackage, fallback = project.groupId)
+        if (jarEnabled) {
+            val packageDir = WirespecJarPackager.packagePath(jarPath, fallback = project.artifactId)
             val jarFile = File(project.build.directory, "${project.build.finalName}-$WIRESPEC_CLASSIFIER.jar")
             WirespecJarPackager.pack(output, packageDir, jarFile)
             projectHelper?.attachArtifact(project, "jar", WIRESPEC_CLASSIFIER, jarFile)

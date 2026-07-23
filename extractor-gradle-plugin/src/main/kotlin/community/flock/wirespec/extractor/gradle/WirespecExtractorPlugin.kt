@@ -38,7 +38,8 @@ class WirespecExtractorPlugin : Plugin<Project> {
             extractSpring.convention(true)
             extractOpenApi.convention(true)
             extractKtor.convention(true)
-            generateJar.convention(false)
+            jarEnabled.convention(false)
+            jarPath.convention(project.name)
         }
 
         project.plugins.withType(JavaPlugin::class.java) {
@@ -62,7 +63,7 @@ class WirespecExtractorPlugin : Plugin<Project> {
             project.tasks.named("assemble") { it.dependsOn(extractTask) }
 
             val packageDir = project.provider {
-                WirespecJarPackager.packagePath(ext.basePackage.orNull, fallback = project.group.toString().ifBlank { project.name })
+                WirespecJarPackager.packagePath(ext.jarPath.orNull, fallback = project.name)
             }
 
             val wirespecJar = project.tasks.register("wirespecJar", Jar::class.java) { jar ->
@@ -78,7 +79,7 @@ class WirespecExtractorPlugin : Plugin<Project> {
             }
 
             project.afterEvaluate {
-                if (ext.generateJar.getOrElse(false)) {
+                if (ext.jarEnabled.getOrElse(false)) {
                     project.tasks.named("assemble") { it.dependsOn(wirespecJar) }
                     project.plugins.withType(MavenPublishPlugin::class.java) {
                         project.extensions.getByType(PublishingExtension::class.java)

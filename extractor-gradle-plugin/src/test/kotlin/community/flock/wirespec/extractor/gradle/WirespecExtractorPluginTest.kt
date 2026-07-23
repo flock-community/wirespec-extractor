@@ -84,7 +84,16 @@ class WirespecExtractorPluginTest {
     }
 
     @Test
-    fun `generateJar false does not add wirespecJar to publications`() {
+    fun `jarPath defaults to the project name`() {
+        val project = ProjectBuilder.builder().withName("acme-api").build()
+        project.plugins.apply("community.flock.wirespec.extractor")
+
+        val ext = project.extensions.getByType(WirespecExtractorExtension::class.java)
+        ext.jarPath.get() shouldBe "acme-api"
+    }
+
+    @Test
+    fun `jarEnabled false does not add wirespecJar to publications`() {
         val project = ProjectBuilder.builder().build()
         project.plugins.apply("java")
         project.plugins.apply("maven-publish")
@@ -100,12 +109,12 @@ class WirespecExtractorPluginTest {
     }
 
     @Test
-    fun `generateJar true attaches wirespecJar to maven publications`() {
+    fun `jarEnabled true attaches wirespecJar to maven publications`() {
         val project = ProjectBuilder.builder().build()
         project.plugins.apply("java")
         project.plugins.apply("maven-publish")
         project.plugins.apply("community.flock.wirespec.extractor")
-        project.extensions.getByType(WirespecExtractorExtension::class.java).generateJar.set(true)
+        project.extensions.getByType(WirespecExtractorExtension::class.java).jarEnabled.set(true)
         project.extensions.getByType(org.gradle.api.publish.PublishingExtension::class.java)
             .publications.create("maven", org.gradle.api.publish.maven.MavenPublication::class.java)
 

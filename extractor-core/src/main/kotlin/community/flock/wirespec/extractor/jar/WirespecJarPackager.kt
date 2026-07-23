@@ -28,7 +28,7 @@ object WirespecJarPackager {
         return target
     }
 
-    /** Slash-separated package dir for jar entries: [basePackage] if set, else [fallback]. */
-    fun packagePath(basePackage: String?, fallback: String): String =
-        (basePackage?.takeIf { it.isNotBlank() } ?: fallback).trim().replace('.', '/').trim('/')
+    /** Slash-separated package dir for jar entries: [configuredPath] if set, else [fallback]. */
+    fun packagePath(configuredPath: String?, fallback: String): String =
+        (configuredPath?.takeIf { it.isNotBlank() } ?: fallback).trim().replace('.', '/').trim('/')
 }
