@@ -31,13 +31,17 @@ object ValidationConstraints {
         val resolvedMin = min ?: size?.min?.toString()
         val resolvedMax = max ?: size?.max?.toString()?.takeIf { size.max != Int.MAX_VALUE }
 
+        // A refined type *definition* is never nullable — nullability belongs at the
+        // use site (the field's Ref), not the definition. Folding base.nullable in here
+        // would also produce two unequal Refined instances (nullable + non-nullable) that
+        // share the same constraint-derived name, defeating dedup in the definitions set.
         return WireType.Refined(
             name = refinedName(base, pattern, resolvedMin, resolvedMax),
             base = base.copy(nullable = false),
             regex = pattern,
             min = resolvedMin,
             max = resolvedMax,
-            nullable = base.nullable,
+            nullable = false,
         )
     }
 

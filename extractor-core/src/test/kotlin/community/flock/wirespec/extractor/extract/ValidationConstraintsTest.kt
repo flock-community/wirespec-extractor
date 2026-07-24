@@ -48,4 +48,27 @@ class ValidationConstraintsTest {
         val r2 = ValidationConstraints.refine(f2, WireType.Primitive(WireType.Primitive.Kind.STRING)) as WireType.Refined
         r1.name shouldBe r2.name
     }
+
+    @Test
+    fun `refined definition is never nullable even when the base is`() {
+        val f = ValidatedDto::class.java.getDeclaredField("age")
+        val refined = ValidationConstraints.refine(
+            f,
+            base = WireType.Primitive(WireType.Primitive.Kind.INTEGER_32, nullable = true),
+        ) as WireType.Refined
+        refined.nullable shouldBe false
+        refined.base.nullable shouldBe false
+    }
+
+    @Test
+    fun `nullable and non-nullable bases produce equal Refined definitions so they dedup`() {
+        val f = ValidatedDto::class.java.getDeclaredField("age")
+        val fromNonNull = ValidationConstraints.refine(f, WireType.Primitive(WireType.Primitive.Kind.INTEGER_32))
+        val fromNullable = ValidationConstraints.refine(
+            f,
+            WireType.Primitive(WireType.Primitive.Kind.INTEGER_32, nullable = true),
+        )
+        // Equal instances collapse in the definitions LinkedHashSet — no duplicate type name.
+        fromNonNull shouldBe fromNullable
+    }
 }
