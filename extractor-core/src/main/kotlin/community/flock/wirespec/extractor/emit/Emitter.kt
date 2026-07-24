@@ -11,7 +11,9 @@ import community.flock.wirespec.compiler.core.parse.ast.Endpoint
 import community.flock.wirespec.compiler.core.parse.ast.FieldIdentifier
 import community.flock.wirespec.compiler.core.parse.ast.Identifier
 import community.flock.wirespec.compiler.core.parse.ast.Module
+import community.flock.wirespec.compiler.core.parse.ast.Reference
 import community.flock.wirespec.compiler.core.parse.ast.Root
+import community.flock.wirespec.compiler.core.parse.ast.Type
 import community.flock.wirespec.compiler.utils.Logger
 import community.flock.wirespec.compiler.utils.noLogger
 import community.flock.wirespec.emitters.wirespec.WirespecEmitter
@@ -54,7 +56,8 @@ class Emitter {
 
         val written = mutableListOf<File>()
 
-        val (dedupedControllers, dedupedShared) = deduplicateNames(controllerDefinitions, sharedTypes)
+        val (unitControllers, unitShared) = replaceEmptyTypesWithUnit(controllerDefinitions, sharedTypes)
+        val (dedupedControllers, dedupedShared) = deduplicateNames(unitControllers, unitShared)
 
         dedupedControllers.forEach { (controller, defs) ->
             defs.toNonEmptyListOrNull()?.let { nel ->
@@ -87,6 +90,66 @@ class Emitter {
         dir.walkTopDown()
             .filter { it.isFile && it.extension == "ws" }
             .forEach { it.delete() }
+    }
+
+    /**
+     * Wirespec forbids empty types (`type Foo {}`), so drop every object type
+     * that has no fields and rewrite every reference to it into `Unit` — the
+     * canonical "no content" reference. This covers all reference sites
+     * (channel payloads, endpoint request/response bodies, path params, query
+     * and header fields, and fields of other types), which also guarantees no
+     * dangling reference is left pointing at a definition we removed.
+     *
+     * Runs before [deduplicateNames] so the freed type names are reflected in
+     * the collision counts.
+     */
+    private fun replaceEmptyTypesWithUnit(
+        controllerDefinitions: Map<String, List<Definition>>,
+        sharedTypes: List<Definition>,
+    ): Pair<Map<String, List<Definition>>, List<Definition>> {
+        val emptyTypeNames = (controllerDefinitions.values.flatten() + sharedTypes)
+            .filterIsInstance<Type>()
+            .filter { it.shape.value.isEmpty() && it.extends.isEmpty() }
+            .mapTo(mutableSetOf()) { it.identifier.value }
+
+        if (emptyTypeNames.isEmpty()) return controllerDefinitions to sharedTypes
+
+        fun rewriteRef(ref: Reference): Reference = when (ref) {
+            is Reference.Custom   -> if (ref.value in emptyTypeNames) Reference.Unit(ref.isNullable) else ref
+            is Reference.Iterable -> ref.copy(reference = rewriteRef(ref.reference))
+            is Reference.Dict     -> ref.copy(reference = rewriteRef(ref.reference))
+            else                  -> ref
+        }
+
+        fun rewriteContent(content: Endpoint.Content?): Endpoint.Content? =
+            content?.copy(reference = rewriteRef(content.reference))
+
+        fun rewrite(def: Definition): Definition = when (def) {
+            is Endpoint -> def.copy(
+                path = def.path.map { seg ->
+                    if (seg is Endpoint.Segment.Param) seg.copy(reference = rewriteRef(seg.reference)) else seg
+                },
+                queries = def.queries.map { it.copy(reference = rewriteRef(it.reference)) },
+                headers = def.headers.map { it.copy(reference = rewriteRef(it.reference)) },
+                requests = def.requests.map { it.copy(content = rewriteContent(it.content)) },
+                responses = def.responses.map { it.copy(content = rewriteContent(it.content)) },
+            )
+            is Channel -> def.copy(reference = rewriteRef(def.reference))
+            is Type -> def.copy(
+                shape = def.shape.copy(
+                    value = def.shape.value.map { it.copy(reference = rewriteRef(it.reference)) }
+                )
+            )
+            else -> def
+        }
+
+        fun rewriteDefs(defs: List<Definition>): List<Definition> = defs
+            .filterNot { it is Type && it.identifier.value in emptyTypeNames }
+            .map(::rewrite)
+
+        val newControllers = controllerDefinitions.mapValues { (_, defs) -> rewriteDefs(defs) }
+        val newShared = rewriteDefs(sharedTypes)
+        return newControllers to newShared
     }
 
     /**

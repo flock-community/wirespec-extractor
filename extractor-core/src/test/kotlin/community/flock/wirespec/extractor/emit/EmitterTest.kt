@@ -373,6 +373,70 @@ class EmitterTest {
     }
 
     @Test
+    fun `empty channel payload type is dropped and referenced as Unit`(@TempDir dir: Path) {
+        val ch = builder.toChannel(Channel(
+            ownerSimpleName = "KeywordController",
+            name = "Publish",
+            payload = WireType.Ref("Publishable"),
+        ))
+        val emptyType = builder.toDefinition(WireType.Object(name = "Publishable", fields = emptyList()))
+
+        emitter.write(
+            outputDir = dir.toFile(),
+            controllerDefinitions = mapOf("KeywordController" to listOf(ch, emptyType)),
+            sharedTypes = emptyList(),
+        )
+        val out = File(dir.toFile(), "KeywordController.ws").readText()
+
+        out shouldContain "channel Publish -> Unit"
+        // The empty type must not be emitted at all.
+        out shouldNotContain "type Publishable"
+    }
+
+    @Test
+    fun `empty response body type is dropped and referenced as Unit`(@TempDir dir: Path) {
+        val ep = builder.toEndpoint(Endpoint(
+            controllerSimpleName = "EmptyController",
+            name = "GetEmpty",
+            method = HttpMethod.GET,
+            pathSegments = listOf(PathSegment.Literal("empty")),
+            queryParams = emptyList(), headerParams = emptyList(), cookieParams = emptyList(),
+            requestBody = null,
+            responses = listOf(Endpoint.Response(200, WireType.Ref("Empty"))),
+        ))
+        val emptyType = builder.toDefinition(WireType.Object(name = "Empty", fields = emptyList()))
+
+        emitter.write(
+            outputDir = dir.toFile(),
+            controllerDefinitions = mapOf("EmptyController" to listOf(ep, emptyType)),
+            sharedTypes = emptyList(),
+        )
+        val out = File(dir.toFile(), "EmptyController.ws").readText()
+
+        out shouldContain "200 -> Unit"
+        out shouldNotContain "type Empty"
+    }
+
+    @Test
+    fun `field referencing an empty type becomes Unit and the empty type is dropped`(@TempDir dir: Path) {
+        val emptyType = builder.toDefinition(WireType.Object(name = "Marker", fields = emptyList()))
+        val holder = builder.toDefinition(WireType.Object(
+            name = "Holder",
+            fields = listOf(
+                WireType.Field("id", WireType.Primitive(WireType.Primitive.Kind.STRING)),
+                WireType.Field("marker", WireType.Ref("Marker")),
+            ),
+        ))
+
+        emitter.write(dir.toFile(), emptyMap(), listOf(emptyType, holder))
+        val types = File(dir.toFile(), "types.ws").readText()
+
+        types shouldContain "marker: Unit"
+        types shouldContain "type Holder"
+        types shouldNotContain "type Marker"
+    }
+
+    @Test
     fun `endpoint colliding with a shared type name is suffixed across files`(@TempDir dir: Path) {
         val ep = builder.toEndpoint(Endpoint(
             controllerSimpleName = "OrderController",
