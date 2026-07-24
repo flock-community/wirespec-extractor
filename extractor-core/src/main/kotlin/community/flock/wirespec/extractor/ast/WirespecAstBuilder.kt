@@ -116,7 +116,8 @@ class WirespecAstBuilder {
             WireType.Primitive.Kind.BOOLEAN -> Reference.Primitive.Type.Boolean
             WireType.Primitive.Kind.BYTES   -> Reference.Primitive.Type.Bytes
         }
-        return Reference.Primitive(type, r.nullable)
+        // A refined type definition can never be nullable; nullability lives at the use site.
+        return Reference.Primitive(type, false)
     }
 
     private fun buildBoundConstraint(r: WireType.Refined): Reference.Primitive.Type.Constraint.Bound? =
