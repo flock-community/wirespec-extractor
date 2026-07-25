@@ -92,6 +92,10 @@ object ReturnTypeUnwrapper {
             val code = if (codeAttr.value() != 500) codeAttr else valueAttr
             return code.value()
         }
+        // No @ResponseStatus: the handler may still set an explicit status on the
+        // ResponseEntity it builds (e.g. ResponseEntity.status(HttpStatus.CREATED)).
+        // That's only visible in the method body, so read it from the bytecode.
+        ResponseEntityStatusScanner.scan(method)?.let { return it }
         return if (unwrapped.isVoid) 204 else 200
     }
 }

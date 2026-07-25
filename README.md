@@ -190,6 +190,11 @@ path on one classpath.
 - Path / query / header / cookie parameters; `@RequestBody`
 - Response types, including unwrapping of `ResponseEntity`, `Mono`, `Flux`,
   `Optional`, `Callable`, `DeferredResult`
+- The success status code — from `@ResponseStatus`, or a status set
+  programmatically on a returned `ResponseEntity`
+  (`ResponseEntity.status(HttpStatus.CREATED)`, `ResponseEntity.created(...)`,
+  `new ResponseEntity<>(body, HttpStatus.CREATED)`, …). See
+  [Success status code](#success-status-code).
 - Multiple response statuses via springdoc `@ApiResponses` /
   `@ApiResponse` — one Wirespec response per declared status. See
   [Multiple responses](#multiple-responses).
@@ -271,6 +276,34 @@ to Spring (`required = false` or a `defaultValue`). An explicit annotation or a
 Kotlin nullable type wins over the `required` flag; Java primitives are always
 non-null.
 
+### Success status code
+
+For an endpoint without `@ApiResponse`(s), the single response's status is
+resolved in this order:
+
+1. **`@ResponseStatus`** on the handler (or a meta-annotation) — used verbatim.
+2. **A status set on the returned `ResponseEntity`**, read from the compiled
+   method body. All of these yield `201`:
+
+   ```kotlin
+   ResponseEntity.status(HttpStatus.CREATED).body(campaign)   // enum
+   ResponseEntity.status(201).body(campaign)                  // int literal
+   ResponseEntity.created(uri).body(campaign)                 // factory
+   ResponseEntity(campaign, HttpStatus.CREATED)               // constructor
+   ```
+
+   The factory methods `ok`/`created`/`accepted`/`noContent`/`badRequest`/
+   `notFound`/`unprocessableEntity`/`internalServerError` are recognized, as is
+   `status(HttpStatus.X)` / `status(<int>)`. `suspend` handlers work too — their
+   body compiles into the same method, so the builder call is still visible.
+3. **The signature default** — `204` when the effective return type is
+   `void`/`Unit`, otherwise `200`.
+
+Body-derived detection is deliberately conservative: it reports a status only
+when the handler builds a single, unambiguous **2xx** `ResponseEntity`. A method
+that returns several different success statuses down different branches falls
+through to the default — declare those variants with `@ApiResponse` instead.
+
 ### Multiple responses
 
 Spring/springdoc lets a handler declare multiple response variants. The
@@ -300,8 +333,8 @@ Behavior:
   emitted body-less.
 - Non-numeric `responseCode`s (`"default"`, `"2XX"`) are skipped with a
   warning.
-- Without any `@ApiResponse`(s), behavior is unchanged: one response derived
-  from the method signature plus `@ResponseStatus`.
+- Without any `@ApiResponse`(s): one response, with the status resolved as
+  described in [Success status code](#success-status-code).
 
 ### Functional DSL routes
 
