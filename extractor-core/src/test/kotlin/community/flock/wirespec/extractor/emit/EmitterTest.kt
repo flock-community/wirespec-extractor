@@ -282,6 +282,63 @@ class EmitterTest {
     }
 
     @Test
+    fun `names colliding only by case are treated as duplicates`(@TempDir dir: Path) {
+        fun ep(name: String) = builder.toEndpoint(Endpoint(
+            controllerSimpleName = "UserController",
+            name = name,
+            method = HttpMethod.GET,
+            pathSegments = listOf(PathSegment.Literal(name.lowercase())),
+            queryParams = emptyList(), headerParams = emptyList(), cookieParams = emptyList(),
+            requestBody = null,
+            responses = listOf(Endpoint.Response(200, null)),
+        ))
+
+        emitter.write(
+            outputDir = dir.toFile(),
+            controllerDefinitions = mapOf("UserController" to listOf(ep("GetUser"), ep("getuser"))),
+            sharedTypes = emptyList(),
+        )
+        val out = File(dir.toFile(), "UserController.ws").readText()
+
+        // Both survive with a suffix — neither keeps its bare name, even though
+        // they differ only by case.
+        out shouldContain "endpoint GetUser1 "
+        out shouldContain "endpoint getuser2 "
+        out shouldNotContain "endpoint GetUser "
+        out shouldNotContain "endpoint getuser "
+    }
+
+    @Test
+    fun `type name blocks a case-insensitively equal endpoint suffix`(@TempDir dir: Path) {
+        val ep = builder.toEndpoint(Endpoint(
+            controllerSimpleName = "OrderController",
+            name = "order",
+            method = HttpMethod.GET,
+            pathSegments = listOf(PathSegment.Literal("order")),
+            queryParams = emptyList(), headerParams = emptyList(), cookieParams = emptyList(),
+            requestBody = null,
+            responses = listOf(Endpoint.Response(200, WireType.Ref("Order"))),
+        ))
+        val typeDef = builder.toDefinition(WireType.Object(
+            name = "Order",
+            fields = listOf(WireType.Field("id", WireType.Primitive(WireType.Primitive.Kind.STRING))),
+        ))
+
+        emitter.write(
+            outputDir = dir.toFile(),
+            controllerDefinitions = mapOf("OrderController" to listOf(ep, typeDef)),
+            sharedTypes = emptyList(),
+        )
+        val out = File(dir.toFile(), "OrderController.ws").readText()
+
+        // Type keeps its bare name; the endpoint that differs only by case is
+        // still recognised as a collision and suffixed.
+        out shouldContain "type Order "
+        out shouldContain "endpoint order1 "
+        out shouldNotContain "endpoint order "
+    }
+
+    @Test
     fun `endpoint and channel sharing a name both get numeric suffix`(@TempDir dir: Path) {
         val ep = builder.toEndpoint(Endpoint(
             controllerSimpleName = "OrderPublisher",
