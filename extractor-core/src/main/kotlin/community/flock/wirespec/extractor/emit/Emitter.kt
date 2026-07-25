@@ -174,24 +174,27 @@ class Emitter {
         sharedTypes: List<Definition>,
     ): Pair<Map<String, List<Definition>>, List<Definition>> {
         val allDefs = controllerDefinitions.values.flatten() + sharedTypes
-        val nameCounts = allDefs.groupingBy { it.identifier.value }.eachCount()
+        // Collisions are detected case-insensitively: `Foo` and `foo` share the
+        // one emitted namespace and must not both keep their bare name, so they
+        // are counted and reserved by their lowercased form.
+        val nameCounts = allDefs.groupingBy { it.identifier.value.lowercase() }.eachCount()
         // Reserve every type name first so a suffixed endpoint never collides
         // with a type called `Foo1` either.
         val used = allDefs
             .filter { it !is Endpoint && it !is Channel }
-            .mapTo(mutableSetOf()) { it.identifier.value }
+            .mapTo(mutableSetOf()) { it.identifier.value.lowercase() }
 
         fun rename(def: Definition): Definition {
             val name = def.identifier.value
             return when {
                 def !is Endpoint && def !is Channel -> def
-                nameCounts.getValue(name) == 1 -> {
-                    used.add(name)
+                nameCounts.getValue(name.lowercase()) == 1 -> {
+                    used.add(name.lowercase())
                     def
                 }
                 else -> {
                     var i = 1
-                    while (!used.add("$name$i")) i++
+                    while (!used.add("$name$i".lowercase())) i++
                     val newName = "$name$i"
                     when (def) {
                         is Endpoint -> def.copy(identifier = DefinitionIdentifier(newName))
