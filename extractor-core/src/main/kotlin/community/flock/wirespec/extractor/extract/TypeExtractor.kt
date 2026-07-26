@@ -126,7 +126,13 @@ open class TypeExtractor {
         }
         // Object class — register and recurse into its fields.
         val fp = cls.name
+        // A value class is never cached (it has no definition of its own), so a hit here
+        // always means an ordinary object.
         cache[fp]?.let { return (it as WireType.Ref).copy(nullable = nullable) }
+        // Kotlin `@JvmInline value class` — a transparent wrapper. Jackson serializes it
+        // as its single underlying value, so flatten to that value's type instead of
+        // emitting a one-field wrapper definition (and without claiming its name).
+        valueProperty(cls)?.let { return fromValueProperty(it, nullable) }
         val name = nameFor(cls)
         val ref = WireType.Ref(name, nullable)
         cache[fp] = ref.copy(nullable = false)
@@ -153,8 +159,49 @@ open class TypeExtractor {
             val v = extractInner(pt.actualTypeArguments[1], nullable = false)
             return WireType.MapOf(v, nullable)
         }
+        // Generic value class (`value class Box<T>(val v: T)`) — flatten to the underlying
+        // value like any other value class, with this instantiation's arguments bound so
+        // the property's type variable resolves.
+        valueProperty(raw)?.let { prop ->
+            @Suppress("UNCHECKED_CAST")
+            val frame = raw.typeParameters
+                .zip(pt.actualTypeArguments)
+                .toMap() as Map<TypeVariable<*>, Type>
+            bindings.addFirst(frame)
+            try {
+                return fromValueProperty(prop, nullable)
+            } finally {
+                bindings.removeFirst()
+            }
+        }
         // User-level generic — flatten.
         return flattenGeneric(pt, nullable)
+    }
+
+    /**
+     * The single property backing a Kotlin `@JvmInline value class`, or null when [cls]
+     * is not a value class.
+     *
+     * `@JvmInline` has BINARY retention and is therefore invisible to reflection; the
+     * reliable runtime marker is the `unbox-impl` bridge the Kotlin compiler generates
+     * for every value class.
+     */
+    private fun valueProperty(cls: Class<*>): java.lang.reflect.Field? {
+        if (!cls.isAnnotationPresent(Metadata::class.java)) return null
+        if (cls.declaredMethods.none { it.name == "unbox-impl" && it.parameterCount == 0 }) return null
+        return cls.declaredFields.singleOrNull {
+            !java.lang.reflect.Modifier.isStatic(it.modifiers) && !it.isSynthetic
+        }
+    }
+
+    /**
+     * Wire type for a value class, taken from its underlying property. A nullable
+     * underlying property (`value class Name(val v: String?)`) makes every use of the
+     * value class nullable, since the wrapper carries no nullability of its own.
+     */
+    private fun fromValueProperty(prop: java.lang.reflect.Field, nullable: Boolean): WireType {
+        val innerNullable = NullabilityResolver.kotlinPropertyNullable(prop) ?: false
+        return withNullability(extractInner(prop.genericType, nullable = false), nullable || innerNullable)
     }
 
     /**
@@ -375,14 +422,22 @@ open class TypeExtractor {
         return out
     }
 
-    private fun withNullability(t: WireType, nullable: Boolean): WireType = when (t) {
-        is WireType.Primitive -> t.copy(nullable = nullable)
-        is WireType.Ref       -> t.copy(nullable = nullable)
-        is WireType.ListOf    -> t.copy(nullable = nullable)
-        is WireType.MapOf     -> t.copy(nullable = nullable)
-        is WireType.Object    -> t.copy(nullable = nullable)
-        is WireType.EnumDef   -> t.copy(nullable = nullable)
-        is WireType.Refined   -> t.copy(nullable = nullable)
+    /**
+     * Stamp [nullable] onto [t]. Nullability inherent to the type itself — `Optional<T>`,
+     * or a value class over a nullable value — widens the result: a non-null declaration
+     * site cannot make such a value guaranteed present.
+     */
+    private fun withNullability(t: WireType, nullable: Boolean): WireType {
+        val n = nullable || t.nullable
+        return when (t) {
+            is WireType.Primitive -> t.copy(nullable = n)
+            is WireType.Ref       -> t.copy(nullable = n)
+            is WireType.ListOf    -> t.copy(nullable = n)
+            is WireType.MapOf     -> t.copy(nullable = n)
+            is WireType.Object    -> t.copy(nullable = n)
+            is WireType.EnumDef   -> t.copy(nullable = n)
+            is WireType.Refined   -> t.copy(nullable = n)
+        }
     }
 
     private fun Class<*>.declaredFieldOrNull(name: String): java.lang.reflect.Field? =
@@ -408,7 +463,7 @@ open class TypeExtractor {
             .filter { it.parameterCount == 0 && (it.name.startsWith("get") || it.name.startsWith("is")) && it.declaringClass != Any::class.java }
             .filter { it.name != "getClass" }
             .map { method ->
-                val raw = method.name.removePrefix("get").removePrefix("is")
+                val raw = KotlinNames.demangle(method.name).removePrefix("get").removePrefix("is")
                 val name = raw.replaceFirstChar { it.lowercase() }
                 name to method.genericReturnType
             }

@@ -68,6 +68,14 @@ object NullabilityResolver {
         return false
     }
 
+    /**
+     * Kotlin-metadata-only view of nullability for a property field: true/false when the
+     * declaring class is a Kotlin class carrying a matching property, null when it cannot
+     * be determined. Unlike [isNullable] this never falls back to a default, so callers
+     * can distinguish "declared non-null" from "unknown".
+     */
+    fun kotlinPropertyNullable(element: AnnotatedElement): Boolean? = kotlinNullable(element)
+
     fun schemaDescription(element: AnnotatedElement): String? =
         element.getAnnotation(Schema::class.java)?.description?.takeIf { it.isNotBlank() }
 

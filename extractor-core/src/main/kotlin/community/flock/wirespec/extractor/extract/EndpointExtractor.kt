@@ -43,7 +43,7 @@ class EndpointExtractor(
         return httpMethods.flatMap { rm ->
             classPaths.flatMap { cp ->
                 methodPaths.mapIndexed { pathIdx, mp ->
-                    val baseName = pascalCase(method.name)
+                    val baseName = pascalCase(KotlinNames.demangle(method.name))
                     val name = baseName +
                         (if (needsMethodSuffix) rm.name.lowercase().replaceFirstChar { it.uppercase() } else "") +
                         (if (needsPathSuffix) (pathIdx + 1).toString() else "")

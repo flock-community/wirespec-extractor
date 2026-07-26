@@ -1,5 +1,6 @@
 package community.flock.wirespec.extractor.extract.messaging
 
+import community.flock.wirespec.extractor.extract.KotlinNames
 import community.flock.wirespec.extractor.extract.TypeExtractor
 import community.flock.wirespec.extractor.model.Channel
 
@@ -23,7 +24,7 @@ internal class MessagingChannelExtractor(
             when (val r = MessagingPayloadSelector.select(site.method, broker)) {
                 is MessagingPayloadSelector.Result.Selected -> Channel(
                     ownerSimpleName = site.ownerClass.simpleName,
-                    name = pascalCase(site.method.name),
+                    name = pascalCase(KotlinNames.demangle(site.method.name)),
                     payload = types.extract(r.payloadType),
                 )
                 is MessagingPayloadSelector.Result.Skipped -> {
@@ -39,7 +40,7 @@ internal class MessagingChannelExtractor(
             .keys.toList()
         val methodCounts = byMethodKey.groupingBy { it.first to it.second }.eachCount()
         return byMethodKey.map { (owner, methodName, valueClass) ->
-            val base = pascalCase(methodName)
+            val base = pascalCase(KotlinNames.demangle(methodName))
             val name = if ((methodCounts[owner to methodName] ?: 0) > 1) "${base}_${valueClass.simpleName}" else base
             Channel(
                 ownerSimpleName = owner.simpleName,

@@ -1,6 +1,7 @@
 package community.flock.wirespec.extractor.extract.jaxrs
 
 import community.flock.wirespec.extractor.extract.ApiResponseExtractor
+import community.flock.wirespec.extractor.extract.KotlinNames
 import community.flock.wirespec.extractor.extract.PathParser
 import community.flock.wirespec.extractor.extract.ReturnTypeUnwrapper
 import community.flock.wirespec.extractor.extract.TypeExtractor
@@ -54,7 +55,7 @@ class JaxRsEndpointExtractor(
         val responses = apiResponses.extract(method, unwrapped)
 
         val name = operation?.operationId?.takeIf { it.isNotBlank() }?.let(::pascalCase)
-            ?: pascalCase(method.name)
+            ?: pascalCase(KotlinNames.demangle(method.name))
 
         return listOf(
             Endpoint(

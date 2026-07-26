@@ -1,6 +1,7 @@
 package com.acme.api
 
 import com.acme.api.dto.UserDto
+import com.acme.api.dto.UserId
 import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
@@ -31,4 +32,10 @@ class UserController {
 
     @GetMapping("/page")
     fun page(): com.acme.api.dto.Page<UserDto> = throw NotImplementedError()
+
+    // Value classes: `UserId` must flatten to its underlying String — no `UserId` type in
+    // the generated Wirespec. A value-class parameter also makes the compiler mangle the
+    // JVM method name (`findByUserId-<hash>`), which must not leak into the endpoint name.
+    @GetMapping("/by-user-id/{id}")
+    fun findByUserId(@PathVariable id: UserId): List<UserId> = throw NotImplementedError()
 }
