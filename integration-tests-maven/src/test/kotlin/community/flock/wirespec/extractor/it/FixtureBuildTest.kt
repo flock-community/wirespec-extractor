@@ -229,6 +229,12 @@ class FixtureBuildTest {
         controller shouldContain "endpoint Page GET /users/page"
         admin shouldContain "endpoint AdminPage GET /admins/page"
 
+        // Kotlin value classes are flattened to the value they wrap: the path variable and
+        // the response element are plain Strings, and the compiler's `-<hash>` name
+        // mangling is stripped from the endpoint name.
+        controller shouldContain "endpoint FindByUserId GET /users/by-user-id/{id: String}"
+        controller shouldMatch Regex("(?s).*endpoint FindByUserId.*200 -> String\\[].*")
+
         // JDK class names must not leak as Wirespec definitions in any file.
         val combined = controller + "\n" + types + "\n" + admin
         assertTrue(!Regex("(?m)^\\s*type\\s+Page\\b").containsMatchIn(combined)) {

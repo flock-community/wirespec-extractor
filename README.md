@@ -205,6 +205,9 @@ path on one classpath.
   `Optional<T>`, Spring's `required` flag, and `@Nullable` / `@NonNull`
   annotations (JSR-305, JetBrains, Spring, JSpecify — including JSpecify's
   `@NullMarked` scopes). See [Nullability](#nullability).
+- Kotlin `@JvmInline value class` wrappers, flattened to the value they wrap
+  rather than emitted as one-field types. See
+  [Kotlin value classes](#kotlin-value-classes).
 - Spring functional-DSL routes — WebFlux Kotlin `router { }` / `coRouter { }`,
   Spring MVC Kotlin `router { }`, and the Java fluent
   `RouterFunctions.route()` builder. See
@@ -250,6 +253,41 @@ method) when it encounters:
 This monomorphization rule means controller signatures must always bind
 their generic parameters concretely.
 
+### Kotlin value classes
+
+A Kotlin `@JvmInline value class` is a compile-time wrapper, and Jackson
+serializes it as the value it wraps. The extractor does the same: it flattens
+the wrapper away instead of emitting a one-field type for it.
+
+```kotlin
+@JvmInline value class UserId(val value: String)
+
+@GetMapping("/users/by-user-id/{id}")
+fun findByUserId(@PathVariable id: UserId): List<UserId>
+```
+
+```wirespec
+endpoint FindByUserId GET /users/by-user-id/{id: String} -> {
+  200 -> String[]
+}
+```
+
+No `UserId` definition is emitted, and the name `UserId` stays free for another
+type to claim. Flattening is recursive (a value class wrapping a value class
+resolves to the innermost value) and works for any underlying type — a
+primitive, a DTO (which is still emitted and referenced), a collection, or a
+generic value class's bound type argument.
+
+Because a value class in a signature makes the Kotlin compiler mangle the JVM
+method name (`findByUserId-_mjp9w0`), the `-<hash>` suffix is stripped when
+deriving endpoint, channel, and property names.
+
+Note that the compiler already erases value classes at most *field* positions,
+so `val id: UserId` reaches the extractor as a plain `String` either way. The
+wrapper survives — and is flattened here — where it stays boxed: generic
+arguments (`List<UserId>`, `ResponseEntity<UserId>`) and nullable positions
+(`UserId?`).
+
 ### Nullability
 
 Every emitted field and parameter is marked nullable (`T?`) or non-null (`T`).
@@ -267,6 +305,10 @@ Every emitted field and parameter is marked nullable (`T?`) or non-null (`T`).
 6. JSpecify `@NullMarked` in scope (the field/method, an enclosing class, or the
    package — reversible with `@NullUnmarked`) → unannotated references become
    non-null.
+
+Nullability that is inherent to a type — `Optional<T>`, or a value class over a
+nullable value — is never narrowed away by a non-null declaration site, since
+the declaration cannot make such a value guaranteed present.
 
 **Endpoint parameters** (`@PathVariable`, `@RequestParam`, `@RequestHeader`,
 `@CookieValue`, `@RequestBody`) instead default to **non-null** — Spring treats

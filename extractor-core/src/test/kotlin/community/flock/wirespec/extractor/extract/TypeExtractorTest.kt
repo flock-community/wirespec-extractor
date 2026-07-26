@@ -1,8 +1,15 @@
 package community.flock.wirespec.extractor.extract
 
 import community.flock.wirespec.extractor.WirespecExtractorException
+import community.flock.wirespec.extractor.fixtures.dto.AccountId
 import community.flock.wirespec.extractor.fixtures.dto.Container
+import community.flock.wirespec.extractor.fixtures.dto.Nickname
+import community.flock.wirespec.extractor.fixtures.dto.Owner
 import community.flock.wirespec.extractor.fixtures.dto.Role
+import community.flock.wirespec.extractor.fixtures.dto.Score
+import community.flock.wirespec.extractor.fixtures.dto.Tags
+import community.flock.wirespec.extractor.fixtures.dto.UserId
+import community.flock.wirespec.extractor.fixtures.dto.ValueClassDto
 import community.flock.wirespec.extractor.fixtures.dto.TemporalDto
 import community.flock.wirespec.extractor.fixtures.dto.UserDto
 import community.flock.wirespec.extractor.model.WireType
@@ -520,5 +527,77 @@ class TypeExtractorTest {
 
         val names = freshExtractor.definitions.map { definitionName(it) }.toSet()
         names shouldContainAll listOf("UserDtoPage", "UserDtoListApiResponse", "UserDtoMapApiResponse")
+    }
+
+    @Test
+    fun `value class flattens to its underlying primitive without a wrapper definition`() {
+        extractor.extract(UserId::class.java) shouldBe WireType.Primitive(WireType.Primitive.Kind.STRING)
+        extractor.extract(Score::class.java) shouldBe WireType.Primitive(WireType.Primitive.Kind.INTEGER_32)
+        extractor.definitions.map { definitionName(it) } shouldNotContain "UserId"
+        extractor.definitions.map { definitionName(it) } shouldNotContain "Score"
+    }
+
+    @Test
+    fun `nested value class flattens all the way down`() {
+        extractor.extract(AccountId::class.java) shouldBe WireType.Primitive(WireType.Primitive.Kind.STRING)
+    }
+
+    @Test
+    fun `value class over a nullable value is nullable at every use`() {
+        extractor.extract(Nickname::class.java) shouldBe
+            WireType.Primitive(WireType.Primitive.Kind.STRING, nullable = true)
+    }
+
+    @Test
+    fun `value class over a DTO flattens to a Ref and still registers the DTO`() {
+        val ref = extractor.extract(Owner::class.java)
+        ref.shouldBeInstanceOf<WireType.Ref>().name shouldBe "UserDto"
+        extractor.definitions.map { definitionName(it) } shouldContain "UserDto"
+        extractor.definitions.map { definitionName(it) } shouldNotContain "Owner"
+    }
+
+    @Test
+    fun `value class over a collection flattens to ListOf`() {
+        val out = extractor.extract(Tags::class.java)
+        out.shouldBeInstanceOf<WireType.ListOf>().element shouldBe WireType.Primitive(WireType.Primitive.Kind.STRING)
+    }
+
+    @Test
+    fun `value class as a generic argument keeps the wrapper name but flattens the value`() {
+        val type = ValueClassDto::class.java.getDeclaredField("container").genericType
+        val ref = extractor.extract(type)
+        ref.shouldBeInstanceOf<WireType.Ref>().name shouldBe "UserIdContainer"
+
+        val obj = extractor.definitions.single { (it as? WireType.Object)?.name == "UserIdContainer" } as WireType.Object
+        val byName = obj.fields.associateBy { it.name }
+        byName["first"]!!.type shouldBe WireType.Primitive(WireType.Primitive.Kind.STRING)
+        byName["items"]!!.type.shouldBeInstanceOf<WireType.ListOf>().element shouldBe
+            WireType.Primitive(WireType.Primitive.Kind.STRING)
+    }
+
+    @Test
+    fun `value class fields are flattened inside the owning object`() {
+        extractor.extract(ValueClassDto::class.java)
+        val obj = extractor.definitions.single { (it as? WireType.Object)?.name == "ValueClassDto" } as WireType.Object
+        val byName = obj.fields.associateBy { it.name }
+
+        byName["id"]!!.type shouldBe WireType.Primitive(WireType.Primitive.Kind.STRING)
+        byName["score"]!!.type shouldBe WireType.Primitive(WireType.Primitive.Kind.INTEGER_32)
+        byName["account"]!!.type shouldBe WireType.Primitive(WireType.Primitive.Kind.STRING)
+        // At a field position the Kotlin compiler already erases the wrapper to its
+        // underlying type, so `nickname: Nickname` is simply a `String` field here and
+        // Nickname's own nullable underlying value is no longer observable.
+        byName["nickname"]!!.type shouldBe WireType.Primitive(WireType.Primitive.Kind.STRING)
+        byName["alias"]!!.type shouldBe WireType.Primitive(WireType.Primitive.Kind.STRING, nullable = true)
+        byName["ids"]!!.type.shouldBeInstanceOf<WireType.ListOf>().element shouldBe
+            WireType.Primitive(WireType.Primitive.Kind.STRING)
+        // Generic value class: the instantiation's argument is bound before flattening.
+        byName["boxes"]!!.type.shouldBeInstanceOf<WireType.ListOf>().element shouldBe
+            WireType.Primitive(WireType.Primitive.Kind.INTEGER_32)
+
+        // No wrapper definitions leaked.
+        val names = extractor.definitions.map { definitionName(it) }
+        names shouldNotContain "UserId"
+        names shouldNotContain "Boxed"
     }
 }

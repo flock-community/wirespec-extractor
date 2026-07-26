@@ -6,6 +6,7 @@ import community.flock.wirespec.extractor.fixtures.InheritingController
 import community.flock.wirespec.extractor.fixtures.MultiMappingController
 import community.flock.wirespec.extractor.fixtures.ParamsController
 import community.flock.wirespec.extractor.fixtures.SuspendController
+import community.flock.wirespec.extractor.fixtures.ValueClassController
 import community.flock.wirespec.extractor.model.Endpoint.HttpMethod
 import community.flock.wirespec.extractor.model.Endpoint.PathSegment
 import community.flock.wirespec.extractor.model.WireType
@@ -113,5 +114,30 @@ class EndpointExtractorTest {
         }
         defNames shouldNotContain "Continuation"
         defNames shouldNotContain "CoroutineContext"
+    }
+
+    @Test
+    fun `value classes flatten and their name mangling is stripped from endpoint names`() {
+        val types = TypeExtractor()
+        val endpoints = EndpointExtractor(types).extract(ValueClassController::class.java)
+
+        endpoints.map { it.name } shouldContainExactlyInAnyOrder listOf("GetUser", "ListUsers", "CreateUser")
+
+        val get = endpoints.single { it.name == "GetUser" }
+        val variable = get.pathSegments.filterIsInstance<PathSegment.Variable>().single()
+        variable.name shouldBe "id"
+        variable.type shouldBe WireType.Primitive(WireType.Primitive.Kind.STRING)
+        get.responses.single().body shouldBe WireType.Primitive(WireType.Primitive.Kind.STRING)
+
+        // ResponseEntity<List<UserId>> — the wrapper survives erasure here and is flattened.
+        endpoints.single { it.name == "ListUsers" }.responses.single().body
+            .shouldBeInstanceOf<WireType.ListOf>().element shouldBe WireType.Primitive(WireType.Primitive.Kind.STRING)
+
+        val create = endpoints.single { it.name == "CreateUser" }
+        create.requestBody shouldBe WireType.Primitive(WireType.Primitive.Kind.STRING)
+        create.responses.single().body shouldBe WireType.Primitive(WireType.Primitive.Kind.STRING)
+
+        // No UserId wrapper definition was emitted.
+        types.definitions.mapNotNull { (it as? WireType.Object)?.name } shouldNotContain "UserId"
     }
 }
