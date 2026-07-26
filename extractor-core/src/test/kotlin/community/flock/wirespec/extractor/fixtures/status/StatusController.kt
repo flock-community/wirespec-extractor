@@ -18,10 +18,15 @@ data class Campaign(val id: String)
  * `ResponseEntity` rather than via `@ResponseStatus` — the status is only
  * visible in the compiled method body, which [ResponseEntityStatusScanner]
  * reads. Mirrors the real-world `createCampaign` shape (suspend + builder).
+ *
+ * The class is `open` so [createOpenSuspend] can be too: that is the shape the
+ * `all-open` compiler plugin gives every handler in a Spring Boot Kotlin
+ * project, and it compiles the body into a separate `$suspendImpl` method.
+ * The other handlers stay final and so keep covering the direct-body path.
  */
 @RestController
 @RequestMapping("/campaigns")
-class StatusController {
+open class StatusController {
 
     @PostMapping("/status-enum")
     fun createViaStatusEnum(@RequestBody body: NewCampaign): ResponseEntity<Campaign> =
@@ -41,6 +46,10 @@ class StatusController {
 
     @PostMapping("/suspend")
     suspend fun createSuspend(@RequestBody body: NewCampaign): ResponseEntity<Campaign> =
+        ResponseEntity.status(HttpStatus.CREATED).body(Campaign("x"))
+
+    @PostMapping("/open-suspend")
+    open suspend fun createOpenSuspend(@RequestBody body: NewCampaign): ResponseEntity<Campaign> =
         ResponseEntity.status(HttpStatus.CREATED).body(Campaign("x"))
 
     @GetMapping("/ok")

@@ -36,6 +36,22 @@ class ResponseEntityStatusScannerTest {
     }
 
     @Test
+    fun `open suspend handler building a CREATED ResponseEntity is read as 201`() {
+        ResponseEntityStatusScanner.scan(method("createOpenSuspend")) shouldBe 201
+    }
+
+    /**
+     * Guards the fixture, not the scanner: if Kotlin ever stopped splitting an
+     * `open` suspend function into a `$suspendImpl`, the test above would pass
+     * for the wrong reason and stop covering the all-open shape.
+     */
+    @Test
+    fun `open suspend handler really compiles to a separate suspendImpl body`() {
+        StatusController::class.java.declaredMethods
+            .any { it.name == "createOpenSuspend\$suspendImpl" } shouldBe true
+    }
+
+    @Test
     fun `ok() factory stays 200`() {
         ResponseEntityStatusScanner.scan(method("okStays200")) shouldBe 200
     }
@@ -52,6 +68,8 @@ class ResponseEntityStatusScannerTest {
         created.responses.single().statusCode shouldBe 201
         val suspend = endpoints.single { it.name == "CreateSuspend" }
         suspend.responses.single().statusCode shouldBe 201
+        val openSuspend = endpoints.single { it.name == "CreateOpenSuspend" }
+        openSuspend.responses.single().statusCode shouldBe 201
         val noContent = endpoints.single { it.name == "DeleteViaNoContent" }
         noContent.responses.single().statusCode shouldBe 204
         noContent.responses.single().body shouldBe null
