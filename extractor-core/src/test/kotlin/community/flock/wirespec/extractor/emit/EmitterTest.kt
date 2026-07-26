@@ -1,7 +1,14 @@
 // src/test/kotlin/community/flock/wirespec/extractor/emit/EmitterTest.kt
 package community.flock.wirespec.extractor.emit
 
+import arrow.core.nonEmptyListOf
+import community.flock.wirespec.compiler.core.FileUri
+import community.flock.wirespec.compiler.core.ModuleContent
+import community.flock.wirespec.compiler.core.ParseContext
+import community.flock.wirespec.compiler.core.parse
+import community.flock.wirespec.compiler.utils.noLogger
 import community.flock.wirespec.extractor.ast.WirespecAstBuilder
+import community.flock.wirespec.extractor.extract.TypeExtractor
 import community.flock.wirespec.extractor.model.Channel
 import community.flock.wirespec.extractor.model.Endpoint
 import community.flock.wirespec.extractor.model.Endpoint.HttpMethod
@@ -16,7 +23,12 @@ import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
+import java.math.BigDecimal
 import java.nio.file.Path
+import java.time.Instant
+import java.time.LocalDate
+import java.time.Period
+import java.time.ZonedDateTime
 import kotlin.io.path.writeText
 
 class EmitterTest {
@@ -523,4 +535,38 @@ class EmitterTest {
         controller shouldContain "endpoint Order1 "
         controller shouldNotContain "endpoint Order "
     }
+
+    @Test
+    fun `temporal fields emit refined types constrained to their ISO shape`(@TempDir dir: Path) {
+        val extractor = TypeExtractor()
+        extractor.extract(Booking::class.java)
+        val defs = extractor.definitions.map { builder.toDefinition(it) }
+
+        emitter.write(dir.toFile(), emptyMap(), defs)
+        val types = File(dir.toFile(), "types.ws").readText()
+
+        types shouldContain """type LocalDate = String(/^\d{4}-\d{2}-\d{2}$/g)"""
+        types shouldContain """type Instant = String(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?Z$/g)"""
+        types shouldContain "day: LocalDate"
+        types shouldContain "bookedAt: Instant"
+        // BigDecimal has no ISO shape to pin down, so it stays an unconstrained String.
+        types shouldContain "price: String"
+
+        // The emitted regex literals must survive a round trip through the Wirespec parser.
+        val ctx = object : ParseContext {
+            override val logger = noLogger
+        }
+        val parsed = ctx.parse(nonEmptyListOf(ModuleContent(FileUri("types.ws"), types)))
+        parsed.isRight() shouldBe true
+    }
+
+    @Suppress("unused")
+    private data class Booking(
+        val day: LocalDate,
+        val bookedAt: Instant,
+        // Patterns with brackets and signs — the ones most likely to trip the tokenizer.
+        val zoned: ZonedDateTime,
+        val span: Period,
+        val price: BigDecimal,
+    )
 }

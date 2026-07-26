@@ -132,9 +132,10 @@ class GradleFixtureBuildTest {
         // Field shapes are asserted against the shared UserDto definition in types.ws.
         types shouldMatch Regex("(?s).*id\\s*:\\s*String\\b(?!\\?).*")
         types shouldMatch Regex("(?s).*nickname\\s*:\\s*String\\?.*")
-        types shouldMatch Regex("(?s).*createdAt\\s*:\\s*String\\b(?!\\?).*")
-        types shouldMatch Regex("(?s).*lastSeen\\s*:\\s*String\\b(?!\\?).*")
-        types shouldMatch Regex("(?s).*timezone\\s*:\\s*String\\b(?!\\?).*")
+        // Temporal fields point at the refined types carrying their ISO-8601 pattern.
+        types shouldMatch Regex("(?s).*createdAt\\s*:\\s*LocalDateTime\\b(?!\\?).*")
+        types shouldMatch Regex("(?s).*lastSeen\\s*:\\s*Instant\\b(?!\\?).*")
+        types shouldMatch Regex("(?s).*timezone\\s*:\\s*ZoneOffset\\b(?!\\?).*")
         types shouldMatch Regex("(?s).*balance\\s*:\\s*String\\b(?!\\?).*")
         types shouldContain "`_internalId`"
         types shouldContain "`SystemKey`"
@@ -166,9 +167,17 @@ class GradleFixtureBuildTest {
             "Raw Page type leaked into a .ws file:\n$combined"
         }
 
-        listOf("LocalDateTime", "Instant", "ZoneOffset", "BigDecimal", "LocalDate", "ZonedDateTime").forEach { jdk ->
+        // ISO-shaped java.time types (LocalDate, LocalDateTime, Instant, …) are absent from
+        // this list on purpose: they are emitted as refined Strings carrying their pattern.
+        listOf("ZoneId", "BigDecimal", "Duration").forEach { jdk ->
             assertTrue(!Regex("(?m)^\\s*(type|enum|refined)\\s+$jdk\\b").containsMatchIn(combined)) {
                 "JDK type $jdk leaked into a .ws file:\n$combined"
+            }
+        }
+        // …while the ISO-shaped ones are emitted as refined Strings carrying their pattern.
+        listOf("LocalDateTime", "Instant", "ZoneOffset").forEach { refined ->
+            assertTrue(Regex("(?m)^type $refined = String\\(/.+/g\\)").containsMatchIn(combined)) {
+                "Refined $refined definition missing from the emitted .ws files:\n$combined"
             }
         }
         listOf("Continuation", "CoroutineContext").forEach { ktInternal ->
@@ -213,9 +222,9 @@ class GradleFixtureBuildTest {
 
         // Field shapes asserted against the shared UserDto definition in types.ws.
         // Java records are all-nullable, so accept both `String` and `String?`.
-        types shouldMatch Regex("(?s).*createdAt\\s*:\\s*String\\??.*")
-        types shouldMatch Regex("(?s).*lastSeen\\s*:\\s*String\\??.*")
-        types shouldMatch Regex("(?s).*timezone\\s*:\\s*String\\??.*")
+        types shouldMatch Regex("(?s).*createdAt\\s*:\\s*LocalDateTime\\??.*")
+        types shouldMatch Regex("(?s).*lastSeen\\s*:\\s*Instant\\??.*")
+        types shouldMatch Regex("(?s).*timezone\\s*:\\s*ZoneOffset\\??.*")
         types shouldMatch Regex("(?s).*balance\\s*:\\s*String\\??.*")
         types shouldContain "`_internalId`"
         types shouldContain "`SystemKey`"
@@ -239,9 +248,17 @@ class GradleFixtureBuildTest {
             "Raw Page type leaked into a .ws file:\n$combined"
         }
 
-        listOf("LocalDateTime", "Instant", "ZoneOffset", "BigDecimal", "LocalDate", "ZonedDateTime").forEach { jdk ->
+        // ISO-shaped java.time types (LocalDate, LocalDateTime, Instant, …) are absent from
+        // this list on purpose: they are emitted as refined Strings carrying their pattern.
+        listOf("ZoneId", "BigDecimal", "Duration").forEach { jdk ->
             assertTrue(!Regex("(?m)^\\s*(type|enum|refined)\\s+$jdk\\b").containsMatchIn(combined)) {
                 "JDK type $jdk leaked into a .ws file:\n$combined"
+            }
+        }
+        // …while the ISO-shaped ones are emitted as refined Strings carrying their pattern.
+        listOf("LocalDateTime", "Instant", "ZoneOffset").forEach { refined ->
+            assertTrue(Regex("(?m)^type $refined = String\\(/.+/g\\)").containsMatchIn(combined)) {
+                "Refined $refined definition missing from the emitted .ws files:\n$combined"
             }
         }
     }
