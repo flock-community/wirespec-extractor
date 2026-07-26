@@ -70,7 +70,15 @@ class WirespecAstBuilderTest {
         def shouldBe def
         val ref = (def as community.flock.wirespec.compiler.core.parse.ast.Refined).reference
         ref.shouldBeInstanceOf<Reference.Primitive>()
-        (ref.type as Reference.Primitive.Type.String).constraint?.value shouldBe "^[A-Z]+$"
+        // Wirespec regex literals are slash-delimited; the bare pattern is wrapped.
+        (ref.type as Reference.Primitive.Type.String).constraint?.value shouldBe "/^[A-Z]+$/g"
+    }
+
+    @Test
+    fun `a regex containing a forward slash is escaped inside the Wirespec literal`() {
+        val r = WireType.Refined("RefinedSlash", WireType.Primitive(WireType.Primitive.Kind.STRING), regex = "^a/b$")
+        val ref = (builder.toDefinition(r) as community.flock.wirespec.compiler.core.parse.ast.Refined).reference
+        ((ref as Reference.Primitive).type as Reference.Primitive.Type.String).constraint?.value shouldBe "/^a\\/b$/g"
     }
 
     @Test

@@ -13,10 +13,12 @@ import community.flock.wirespec.extractor.fixtures.dto.ValueClassDto
 import community.flock.wirespec.extractor.fixtures.dto.TemporalDto
 import community.flock.wirespec.extractor.fixtures.dto.UserDto
 import community.flock.wirespec.extractor.model.WireType
+import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldContainAll
 import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain as shouldContainString
 import io.kotest.matchers.types.shouldBeInstanceOf
 import org.junit.jupiter.api.Test
@@ -24,16 +26,22 @@ import org.junit.jupiter.api.assertThrows
 import java.math.BigDecimal
 import java.math.BigInteger
 import java.net.URI
+import java.time.DayOfWeek
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
+import java.time.MonthDay
 import java.time.OffsetDateTime
+import java.time.OffsetTime
 import java.time.Period
+import java.time.Year
+import java.time.YearMonth
 import java.time.ZoneId
 import java.time.ZoneOffset
 import java.time.ZonedDateTime
+import java.util.Calendar
 import java.util.Date
 
 class TypeExtractorTest {
@@ -137,51 +145,113 @@ class TypeExtractorTest {
     }
 
     @Test
-    fun `LocalDateTime maps to STRING primitive and is not registered as a definition`() {
-        extractor.extract(LocalDateTime::class.java) shouldBe WireType.Primitive(WireType.Primitive.Kind.STRING)
-        extractor.definitions.map { definitionName(it) } shouldNotContain "LocalDateTime"
+    fun `string-shaped date and time types map to a refined String named after the type`() {
+        listOf(
+            LocalDate::class.java,
+            LocalTime::class.java,
+            LocalDateTime::class.java,
+            Instant::class.java,
+            OffsetTime::class.java,
+            OffsetDateTime::class.java,
+            ZonedDateTime::class.java,
+            YearMonth::class.java,
+            MonthDay::class.java,
+            Year::class.java,
+            ZoneOffset::class.java,
+            Period::class.java,
+        ).forEach { cls ->
+            extractor.extract(cls) shouldBe WireType.Ref(cls.simpleName)
+            val refined = extractor.definitions
+                .filterIsInstance<WireType.Refined>()
+                .single { it.name == cls.simpleName }
+            refined.base shouldBe WireType.Primitive(WireType.Primitive.Kind.STRING)
+            refined.regex shouldNotBe null
+        }
     }
 
     @Test
-    fun `LocalDate maps to STRING primitive`() {
-        extractor.extract(LocalDate::class.java) shouldBe WireType.Primitive(WireType.Primitive.Kind.STRING)
+    fun `pre-java-time date types are refined too, with names disambiguated on collision`() {
+        // java.util.Date and java.sql.Date share a simple name; the second one claims a suffix.
+        extractor.extract(Date::class.java) shouldBe WireType.Ref("Date")
+        extractor.extract(java.sql.Date::class.java) shouldBe WireType.Ref("Date2")
+        extractor.extract(java.sql.Timestamp::class.java) shouldBe WireType.Ref("Timestamp")
+        extractor.extract(java.sql.Time::class.java) shouldBe WireType.Ref("Time")
+        extractor.extract(Calendar::class.java) shouldBe WireType.Ref("Calendar")
+        extractor.definitions.filterIsInstance<WireType.Refined>().map { it.name } shouldContainAll
+            listOf("Date", "Date2", "Timestamp", "Time", "Calendar")
+    }
+
+    /**
+     * The patterns are only worth having if they accept what Jackson actually writes.
+     * Every sample below was taken from an ObjectMapper with JavaTimeModule and
+     * WRITE_DATES_AS_TIMESTAMPS disabled — Spring Boot's default — plus the `toString()`
+     * forms that drop zero seconds, which other producers emit.
+     */
+    @Test
+    fun `each temporal regex accepts the values its type serializes to`() {
+        fun accepts(cls: Class<*>, vararg samples: String) {
+            val refined = extractor.extract(cls).let { ref ->
+                extractor.definitions.filterIsInstance<WireType.Refined>()
+                    .single { it.name == (ref as WireType.Ref).name }
+            }
+            val regex = Regex(refined.regex!!)
+            samples.forEach { sample ->
+                withClue("${cls.simpleName} regex ${refined.regex} should accept $sample") {
+                    regex.matches(sample) shouldBe true
+                }
+            }
+        }
+
+        accepts(LocalDate::class.java, "2024-01-31")
+        accepts(LocalTime::class.java, "10:15", "10:15:00", "10:15:30.123456789")
+        accepts(LocalDateTime::class.java, "2024-01-31T10:15", "2024-01-31T10:15:00", "2024-01-31T10:15:30.123")
+        accepts(Instant::class.java, "2024-01-31T10:15:30Z", "2024-01-31T10:15:30.123456789Z")
+        accepts(OffsetTime::class.java, "10:15:30+01:00", "10:15:30Z")
+        accepts(OffsetDateTime::class.java, "2024-01-31T10:15:30+01:00", "2024-01-31T10:15:30Z")
+        accepts(ZonedDateTime::class.java, "2024-01-31T10:15:30+01:00", "2024-01-31T10:15:30+01:00[Europe/Amsterdam]")
+        accepts(YearMonth::class.java, "2024-01")
+        accepts(MonthDay::class.java, "--01-31")
+        accepts(Year::class.java, "2024", "+12345", "-0044")
+        accepts(ZoneOffset::class.java, "+01:00", "Z", "-05:30")
+        accepts(Period::class.java, "P1Y2M3D", "P0D", "P-1Y-2M")
+        accepts(Date::class.java, "2024-01-31T10:15:30.000+00:00", "2024-01-31T10:15:30.000+01:00")
+        accepts(java.sql.Date::class.java, "2024-01-31")
+        accepts(java.sql.Time::class.java, "11:15:30")
     }
 
     @Test
-    fun `LocalTime maps to STRING primitive`() {
-        extractor.extract(LocalTime::class.java) shouldBe WireType.Primitive(WireType.Primitive.Kind.STRING)
+    fun `a temporal regex rejects a value of the wrong shape`() {
+        val refined = extractor.extract(LocalDate::class.java).let { ref ->
+            extractor.definitions.filterIsInstance<WireType.Refined>()
+                .single { it.name == (ref as WireType.Ref).name }
+        }
+        Regex(refined.regex!!).matches("2024-01-31T10:15:30Z") shouldBe false
     }
 
     @Test
-    fun `Instant maps to STRING primitive`() {
-        extractor.extract(Instant::class.java) shouldBe WireType.Primitive(WireType.Primitive.Kind.STRING)
+    fun `nullable LocalDate refers to the same single refined definition`() {
+        extractor.extract(LocalDate::class.java, nullable = false)
+        extractor.extract(LocalDate::class.java, nullable = true) shouldBe WireType.Ref("LocalDate", nullable = true)
+        extractor.definitions.filterIsInstance<WireType.Refined>().count { it.name == "LocalDate" } shouldBe 1
     }
 
     @Test
-    fun `ZoneOffset maps to STRING primitive and is not registered as a definition`() {
-        extractor.extract(ZoneOffset::class.java) shouldBe WireType.Primitive(WireType.Primitive.Kind.STRING)
-        extractor.definitions.map { definitionName(it) } shouldNotContain "ZoneOffset"
-    }
-
-    @Test
-    fun `ZoneId maps to STRING primitive`() {
+    fun `ZoneId maps to STRING primitive — a region name has no shape worth pinning`() {
         extractor.extract(ZoneId::class.java) shouldBe WireType.Primitive(WireType.Primitive.Kind.STRING)
+        extractor.definitions.map { definitionName(it) } shouldNotContain "ZoneId"
     }
 
     @Test
-    fun `ZonedDateTime maps to STRING primitive`() {
-        extractor.extract(ZonedDateTime::class.java) shouldBe WireType.Primitive(WireType.Primitive.Kind.STRING)
-    }
-
-    @Test
-    fun `OffsetDateTime maps to STRING primitive`() {
-        extractor.extract(OffsetDateTime::class.java) shouldBe WireType.Primitive(WireType.Primitive.Kind.STRING)
-    }
-
-    @Test
-    fun `Duration and Period map to STRING primitive`() {
+    fun `Duration stays a STRING primitive because Jackson writes it as a number`() {
         extractor.extract(Duration::class.java) shouldBe WireType.Primitive(WireType.Primitive.Kind.STRING)
-        extractor.extract(Period::class.java) shouldBe WireType.Primitive(WireType.Primitive.Kind.STRING)
+        extractor.definitions.map { definitionName(it) } shouldNotContain "Duration"
+    }
+
+    @Test
+    fun `DayOfWeek and Month stay Wirespec enums, not refined Strings`() {
+        extractor.extract(DayOfWeek::class.java) shouldBe WireType.Ref("DayOfWeek")
+        extractor.definitions.filterIsInstance<WireType.EnumDef>()
+            .single { it.name == "DayOfWeek" }.values shouldContain "MONDAY"
     }
 
     @Test
@@ -191,41 +261,43 @@ class TypeExtractorTest {
     }
 
     @Test
-    fun `URI and util Date map to STRING primitive`() {
+    fun `URI maps to STRING primitive`() {
         extractor.extract(URI::class.java) shouldBe WireType.Primitive(WireType.Primitive.Kind.STRING)
-        extractor.extract(Date::class.java) shouldBe WireType.Primitive(WireType.Primitive.Kind.STRING)
     }
 
     @Test
-    fun `DTO with JDK temporal fields produces STRING fields and no nested JDK definitions`() {
+    fun `DTO with JDK temporal fields refers to refined types and never expands JDK internals`() {
         val ref = extractor.extract(TemporalDto::class.java)
         ref.shouldBeInstanceOf<WireType.Ref>().name shouldBe "TemporalDto"
 
         val obj = extractor.definitions.single { (it as? WireType.Object)?.name == "TemporalDto" } as WireType.Object
         val byName = obj.fields.associateBy { it.name }
-        byName["createdAt"]!!.type.shouldBeInstanceOf<WireType.Primitive>().kind shouldBe WireType.Primitive.Kind.STRING
-        byName["birthDate"]!!.type.shouldBeInstanceOf<WireType.Primitive>().kind shouldBe WireType.Primitive.Kind.STRING
-        byName["occurredAt"]!!.type.shouldBeInstanceOf<WireType.Primitive>().kind shouldBe WireType.Primitive.Kind.STRING
-        byName["timezone"]!!.type.shouldBeInstanceOf<WireType.Primitive>().kind shouldBe WireType.Primitive.Kind.STRING
-        byName["zoned"]!!.type.shouldBeInstanceOf<WireType.Primitive>().kind shouldBe WireType.Primitive.Kind.STRING
+        byName["createdAt"]!!.type.shouldBeInstanceOf<WireType.Ref>().name shouldBe "LocalDateTime"
+        byName["birthDate"]!!.type.shouldBeInstanceOf<WireType.Ref>().name shouldBe "LocalDate"
+        byName["occurredAt"]!!.type.shouldBeInstanceOf<WireType.Ref>().name shouldBe "Instant"
+        byName["zoned"]!!.type.shouldBeInstanceOf<WireType.Ref>().name shouldBe "ZonedDateTime"
+        byName["timezone"]!!.type.shouldBeInstanceOf<WireType.Ref>().name shouldBe "ZoneOffset"
+        // A JDK value type with no shape worth pinning stays an opaque string.
         byName["price"]!!.type.shouldBeInstanceOf<WireType.Primitive>().kind shouldBe WireType.Primitive.Kind.STRING
 
-        val defNames = extractor.definitions.map { definitionName(it) }.toSet()
-        defNames shouldNotContain "LocalDateTime"
-        defNames shouldNotContain "LocalDate"
-        defNames shouldNotContain "Instant"
-        defNames shouldNotContain "ZoneOffset"
-        defNames shouldNotContain "ZonedDateTime"
-        defNames shouldNotContain "BigDecimal"
+        // The temporal types are definitions, but only ever as refined Strings — never as
+        // objects expanded from their private fields.
+        val objectNames = extractor.definitions.filterIsInstance<WireType.Object>().map { it.name }
+        listOf("LocalDateTime", "LocalDate", "Instant", "ZonedDateTime", "ZoneOffset").forEach { name ->
+            extractor.definitions.filterIsInstance<WireType.Refined>().map { it.name } shouldContain name
+            objectNames shouldNotContain name
+        }
+
+        extractor.definitions.map { definitionName(it) } shouldNotContain "BigDecimal"
     }
 
     @Test
-    fun `List of LocalDateTime becomes ListOf STRING with no JDK definitions`() {
+    fun `List of LocalDateTime becomes a ListOf the refined LocalDateTime`() {
         val type = TemporalDtoListHolder::class.java.getDeclaredField("timestamps").genericType
         val out = extractor.extract(type)
         val list = out.shouldBeInstanceOf<WireType.ListOf>()
-        list.element shouldBe WireType.Primitive(WireType.Primitive.Kind.STRING)
-        extractor.definitions.map { definitionName(it) } shouldNotContain "LocalDateTime"
+        list.element shouldBe WireType.Ref("LocalDateTime")
+        extractor.definitions.filterIsInstance<WireType.Object>().map { it.name } shouldNotContain "LocalDateTime"
     }
 
     @Suppress("unused")

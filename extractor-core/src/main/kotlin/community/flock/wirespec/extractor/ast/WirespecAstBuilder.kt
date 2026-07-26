@@ -95,7 +95,7 @@ class WirespecAstBuilder {
     private fun buildRefinedReference(r: WireType.Refined): Reference.Primitive {
         val type: Reference.Primitive.Type = when (r.base.kind) {
             WireType.Primitive.Kind.STRING -> Reference.Primitive.Type.String(
-                constraint = r.regex?.let { Reference.Primitive.Type.Constraint.RegExp(it) }
+                constraint = r.regex?.let { regExp(it) }
             )
             WireType.Primitive.Kind.INTEGER_32 -> Reference.Primitive.Type.Integer(
                 precision = Reference.Primitive.Type.Precision.P32,
@@ -118,6 +118,16 @@ class WirespecAstBuilder {
         }
         // A refined type definition can never be nullable; nullability lives at the use site.
         return Reference.Primitive(type, false)
+    }
+
+    /**
+     * Wrap a bare pattern in a Wirespec regex literal — `/pattern/g`. The Wirespec tokenizer
+     * only recognises a regex when it is slash-delimited and ends the pattern at the first
+     * unescaped `/`, so inner slashes are escaped here.
+     */
+    private fun regExp(pattern: String): Reference.Primitive.Type.Constraint.RegExp {
+        val body = pattern.replace("\\/", "/").replace("/", "\\/")
+        return Reference.Primitive.Type.Constraint.RegExp("/$body/g")
     }
 
     private fun buildBoundConstraint(r: WireType.Refined): Reference.Primitive.Type.Constraint.Bound? =

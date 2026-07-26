@@ -208,6 +208,10 @@ path on one classpath.
 - Kotlin `@JvmInline value class` wrappers, flattened to the value they wrap
   rather than emitted as one-field types. See
   [Kotlin value classes](#kotlin-value-classes).
+- Date and time types with a string wire form — `java.time` and the older
+  `java.util` / `java.sql` ones — emitted as refined Strings pinned to that
+  shape rather than as bare `String`s. See
+  [Date and time types](#date-and-time-types).
 - Spring functional-DSL routes — WebFlux Kotlin `router { }` / `coRouter { }`,
   Spring MVC Kotlin `router { }`, and the Java fluent
   `RouterFunctions.route()` builder. See
@@ -287,6 +291,55 @@ so `val id: UserId` reaches the extractor as a plain `String` either way. The
 wrapper survives — and is flattened here — where it stays boxed: generic
 arguments (`List<UserId>`, `ResponseEntity<UserId>`) and nullable positions
 (`UserId?`).
+
+### Date and time types
+
+JDK value types are never walked into nested Wirespec types — their private
+fields are implementation detail. Every date/time type Jackson writes as a
+string gets a refined `String` definition carrying that shape, so the spec
+states the format instead of accepting any string:
+
+```kotlin
+data class EventDto(val day: LocalDate, val at: Instant)
+```
+
+```wirespec
+type LocalDate = String(/^\d{4}-\d{2}-\d{2}$/g)
+type Instant = String(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?Z$/g)
+
+type EventDto {
+  day: LocalDate,
+  at: Instant
+}
+```
+
+Constrained:
+
+| | |
+|---|---|
+| `java.time` | `LocalDate`, `LocalTime`, `LocalDateTime`, `Instant`, `OffsetTime`, `OffsetDateTime`, `ZonedDateTime`, `YearMonth`, `MonthDay`, `Year`, `ZoneOffset`, `Period` |
+| pre-`java.time` | `java.util.Date`, `java.util.Calendar`, `java.sql.Date`, `java.sql.Time`, `java.sql.Timestamp` |
+
+One definition is emitted per type, however many DTOs use it. Names follow the
+usual collision rule, so a project class called `Instant` — or the two `Date`s,
+if you use both `java.util` and `java.sql` — gets a numeric suffix.
+
+`DayOfWeek` and `Month` are Java enums and already come out as Wirespec `enum`s.
+The remaining types stay an unconstrained `String`:
+
+- `Duration` — Jackson writes it as a JSON *number* of seconds
+  (`5400.000000000`), so no string pattern describes it. Note the extractor
+  still types it `String`, which is wrong for the default configuration.
+- `ZoneId` — a free-form region name (`Europe/Amsterdam`).
+- Non-temporal JDK values: `BigDecimal`, `URI`, `UUID`, …
+
+The patterns match what Jackson emits with `JavaTimeModule` and
+`WRITE_DATES_AS_TIMESTAMPS` disabled — Spring Boot's default. Where ISO-8601
+has optional parts they accept all of them: Jackson pads seconds (`10:15:00`)
+while `toString()` and other producers drop them (`10:15`), and fractions run
+from absent to nanoseconds. A field carrying `@JsonFormat`, or an app that sets
+`spring.jackson.date-format` or re-enables timestamps, serializes differently —
+these patterns describe the defaults.
 
 ### Nullability
 

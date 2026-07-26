@@ -109,6 +109,18 @@ open class TypeExtractor {
         if (Collection::class.java.isAssignableFrom(cls)) {
             return WireType.ListOf(WireType.Primitive(WireType.Primitive.Kind.STRING), nullable)
         }
+        // java.time types that serialize to an ISO-8601 string ("2024-01-31",
+        // "2024-01-31T10:15:30Z", …) carry enough shape to be worth stating: emit a refined
+        // String holding that pattern rather than an unconstrained STRING.
+        TemporalRefinements.regexFor(cls)?.let { regex ->
+            val name = nameFor(cls)
+            _definitions += WireType.Refined(
+                name = name,
+                base = WireType.Primitive(WireType.Primitive.Kind.STRING),
+                regex = regex,
+            )
+            return WireType.Ref(name, nullable)
+        }
         // JDK / platform value types (java.time.*, java.math.BigDecimal, java.net.URI, …):
         // walking their declared fields would leak internal implementation details
         // (e.g. ZoneOffset's `totalSeconds`) into the Wirespec schema. Jackson serializes
