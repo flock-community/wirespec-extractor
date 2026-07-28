@@ -1,5 +1,6 @@
 package community.flock.wirespec.extractor.extract.ktor
 
+import community.flock.wirespec.extractor.scan.isDeclaredType
 import io.github.classgraph.ClassGraph
 
 /**
@@ -37,6 +38,7 @@ internal object KtorClientScanner {
 
         graph.scan().use { result ->
             return result.allClasses
+                .filter { ci -> ci.isDeclaredType() }
                 .filter { ci -> FRAMEWORK_EXCLUSIONS.none { ci.name.startsWith("$it.") } }
                 .filter { ci -> basePackage == null || ci.name.startsWith("$basePackage.") || ci.name == basePackage }
                 .filter { ci ->
