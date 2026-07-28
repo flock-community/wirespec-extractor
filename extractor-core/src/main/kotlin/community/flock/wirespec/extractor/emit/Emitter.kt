@@ -59,10 +59,16 @@ class Emitter {
         val (unitControllers, unitShared) = replaceEmptyTypesWithUnit(controllerDefinitions, sharedTypes)
         val (dedupedControllers, dedupedShared) = deduplicateNames(unitControllers, unitShared)
 
+        // File names are claimed case-insensitively: on macOS/Windows `Keyword.ws` and
+        // `keyword.ws` are the same file, so a second controller differing only by case
+        // would silently overwrite the first. `types` is reserved for the shared file.
+        val usedFileNames = mutableSetOf("types")
+
         dedupedControllers.forEach { (controller, defs) ->
             defs.toNonEmptyListOrNull()?.let { nel ->
-                val path = File(outputDir, "$controller.ws")
-                path.writeText(render(nel, "$controller.ws"))
+                val fileName = uniqueFileName(controller, usedFileNames)
+                val path = File(outputDir, "$fileName.ws")
+                path.writeText(render(nel, "$fileName.ws"))
                 written += path
             }
         }
@@ -74,6 +80,17 @@ class Emitter {
         }
 
         return written
+    }
+
+    /**
+     * Returns [base] if no file with that name (ignoring case) has been written yet,
+     * otherwise `base2`, `base3`, … The chosen name is added to [used].
+     */
+    private fun uniqueFileName(base: String, used: MutableSet<String>): String {
+        if (used.add(base.lowercase())) return base
+        var i = 2
+        while (!used.add("$base$i".lowercase())) i++
+        return "$base$i"
     }
 
     private fun render(defs: NonEmptyList<Definition>, fileName: String): String {

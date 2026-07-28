@@ -20,8 +20,13 @@ open class TypeExtractor {
 
     private val cache = mutableMapOf<String, WireType>()
     protected val _definitions = linkedSetOf<WireType>()
-    /** Tracks which simple name has been claimed by which FQN to detect cross-package collisions. */
-    private val usedNames = mutableMapOf<String, String>()  // simpleName -> identity that claimed it
+    /**
+     * Tracks which simple name has been claimed by which FQN to detect cross-package collisions.
+     * Keyed by the **lowercased** name: emitted names end up as file names downstream, and on a
+     * case-insensitive filesystem (macOS, Windows) `KeywordDTO` and `KeywordDto` would overwrite
+     * each other, so names that differ only by case count as a collision.
+     */
+    private val usedNames = mutableMapOf<String, String>()  // simpleName.lowercase() -> identity that claimed it
 
     /** Stack of TypeVariable -> Type bindings, pushed when entering a parameterized type's body. */
     private val bindings = ArrayDeque<Map<TypeVariable<*>, Type>>()
@@ -48,19 +53,25 @@ open class TypeExtractor {
     /**
      * Returns a unique name for [cls], disambiguating with a numeric suffix when two classes
      * from different packages share the same simple name (e.g. com.a.User and com.b.User → "User", "User2").
+     * Comparison ignores case, so `KeywordDTO` and `KeywordDto` disambiguate too — see [usedNames].
      */
-    private fun nameFor(cls: Class<*>): String {
-        val simple = cls.simpleName
-        val existing = usedNames[simple]
+    private fun nameFor(cls: Class<*>): String = claim(cls.simpleName, cls.name)
+
+    /**
+     * Claim [name] for [identity], returning [name] itself when free (or already held by
+     * [identity]) and `name2`, `name3`, … when another identity holds it.
+     */
+    private fun claim(name: String, identity: String): String {
+        val existing = usedNames[name.lowercase()]
         return when {
-            existing == null -> { usedNames[simple] = cls.name; simple }
-            existing == cls.name -> simple
+            existing == null -> { usedNames[name.lowercase()] = identity; name }
+            existing == identity -> name
             else -> {
                 // collision — find or assign a numeric suffix
                 var i = 2
-                while (usedNames["$simple$i"] != null && usedNames["$simple$i"] != cls.name) i++
-                val newName = "$simple$i"
-                if (usedNames[newName] == null) usedNames[newName] = cls.name
+                while (usedNames["$name$i".lowercase()].let { it != null && it != identity }) i++
+                val newName = "$name$i"
+                usedNames.putIfAbsent(newName.lowercase(), identity)
                 newName
             }
         }
@@ -72,21 +83,8 @@ open class TypeExtractor {
      * under the plain FQN cannot match a flattened-generic identity, and the flattened
      * generic gets a numeric suffix.
      */
-    private fun nameFor(composed: String, rawClass: Class<*>): String {
-        val identity = "${rawClass.name}#$composed"
-        val existing = usedNames[composed]
-        return when {
-            existing == null -> { usedNames[composed] = identity; composed }
-            existing == identity -> composed
-            else -> {
-                var i = 2
-                while (usedNames["$composed$i"] != null && usedNames["$composed$i"] != identity) i++
-                val newName = "$composed$i"
-                if (usedNames[newName] == null) usedNames[newName] = identity
-                newName
-            }
-        }
-    }
+    private fun nameFor(composed: String, rawClass: Class<*>): String =
+        claim(composed, "${rawClass.name}#$composed")
 
     private fun fromClass(cls: Class<*>, nullable: Boolean): WireType {
         primitiveOf(cls)?.let { return it.copy(nullable = nullable) }

@@ -442,6 +442,57 @@ class EmitterTest {
     }
 
     @Test
+    fun `controller file names colliding only by case get a suffix instead of overwriting`(@TempDir dir: Path) {
+        fun ep(controller: String, name: String) = builder.toEndpoint(Endpoint(
+            controllerSimpleName = controller,
+            name = name,
+            method = HttpMethod.GET,
+            pathSegments = listOf(PathSegment.Literal(name.lowercase())),
+            queryParams = emptyList(), headerParams = emptyList(), cookieParams = emptyList(),
+            requestBody = null,
+            responses = listOf(Endpoint.Response(200, null)),
+        ))
+
+        emitter.write(
+            outputDir = dir.toFile(),
+            controllerDefinitions = mapOf(
+                "KeywordController" to listOf(ep("KeywordController", "GetKeyword")),
+                "KeywordCONTROLLER" to listOf(ep("KeywordCONTROLLER", "ListKeywords")),
+            ),
+            sharedTypes = emptyList(),
+        )
+
+        // Both controllers survive: the second claims a suffixed file name.
+        dir.toFile().listFiles()!!.map { it.name }.sorted() shouldBe
+            listOf("KeywordCONTROLLER.ws", "KeywordController2.ws")
+        File(dir.toFile(), "KeywordCONTROLLER.ws").readText() shouldContain "endpoint ListKeywords "
+        File(dir.toFile(), "KeywordController2.ws").readText() shouldContain "endpoint GetKeyword "
+    }
+
+    @Test
+    fun `a controller named types does not overwrite the shared types file`(@TempDir dir: Path) {
+        val ep = builder.toEndpoint(Endpoint(
+            controllerSimpleName = "Types",
+            name = "GetThing",
+            method = HttpMethod.GET,
+            pathSegments = listOf(PathSegment.Literal("thing")),
+            queryParams = emptyList(), headerParams = emptyList(), cookieParams = emptyList(),
+            requestBody = null,
+            responses = listOf(Endpoint.Response(200, null)),
+        ))
+        val typeDef = builder.toDefinition(WireType.Object(
+            name = "UserDto",
+            fields = listOf(WireType.Field("id", WireType.Primitive(WireType.Primitive.Kind.STRING))),
+        ))
+
+        emitter.write(dir.toFile(), mapOf("Types" to listOf(ep)), listOf(typeDef))
+
+        dir.toFile().listFiles()!!.map { it.name }.sorted() shouldBe listOf("Types2.ws", "types.ws")
+        File(dir.toFile(), "Types2.ws").readText() shouldContain "endpoint GetThing "
+        File(dir.toFile(), "types.ws").readText() shouldContain "type UserDto"
+    }
+
+    @Test
     fun `empty channel payload type is dropped and referenced as Unit`(@TempDir dir: Path) {
         val ch = builder.toChannel(Channel(
             ownerSimpleName = "KeywordController",

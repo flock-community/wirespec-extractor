@@ -145,6 +145,18 @@ class TypeExtractorTest {
     }
 
     @Test
+    fun `two classes whose simple names differ only by case get disambiguated names`() {
+        // On a case-insensitive filesystem the emitted files would otherwise overwrite each other.
+        val freshExtractor = TypeExtractor()
+        val r1 = freshExtractor.extract(community.flock.wirespec.extractor.fixtures.dto.clashA.KeywordDto::class.java)
+        val r2 = freshExtractor.extract(community.flock.wirespec.extractor.fixtures.dto.clashB.KeywordDTO::class.java)
+        (r1 as WireType.Ref).name shouldBe "KeywordDto"
+        (r2 as WireType.Ref).name shouldBe "KeywordDTO2"
+        val names = freshExtractor.definitions.filterIsInstance<WireType.Object>().map { it.name }
+        names shouldContainAll listOf("KeywordDto", "KeywordDTO2")
+    }
+
+    @Test
     fun `string-shaped date and time types map to a refined String named after the type`() {
         listOf(
             LocalDate::class.java,
