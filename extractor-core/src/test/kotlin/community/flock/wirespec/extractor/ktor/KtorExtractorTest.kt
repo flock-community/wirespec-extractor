@@ -70,6 +70,24 @@ class KtorExtractorTest {
     }
 
     @Test
+    fun `extracts a client whose requests come from inline reified helpers`(@TempDir tmp: Path) {
+        // The inlined helpers leave two nameless anonymous classes behind, both
+        // capturing the HttpRequestBuilder. They are compiler output, not
+        // clients: scanning them used to abort the run with a simple-name
+        // collision between two empty names.
+        val files = extract(tmp)
+        files.map { it.name } shouldContainAll listOf("KtorInlineReifiedClient.ws")
+
+        // One endpoint per public method, with the reified type resolved at the
+        // call site. (The helpers' own compiled copies still add a GetAll /
+        // GetSingle pair — inline declarations are not yet recognised as such.)
+        val ws = files.single { it.name == "KtorInlineReifiedClient.ws" }.readText()
+        ws shouldContain "endpoint ListInlineUsers GET /inline/users"
+        ws shouldContain "endpoint GetInlineUser GET /inline/users/single"
+        ws shouldContain "UserDto[]"
+    }
+
+    @Test
     fun `extracts Ktor query and header parameters from the handler body`(@TempDir tmp: Path) {
         val files = extract(tmp)
         val ws = files.single { it.name == "KtorSearchRoutesKt.ws" }.readText()
