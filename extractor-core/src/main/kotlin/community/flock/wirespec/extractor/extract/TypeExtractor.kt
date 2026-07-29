@@ -9,6 +9,14 @@ import java.lang.reflect.WildcardType
 import java.util.Optional
 import java.util.UUID
 
+private val FRAMEWORK_PACKAGES = listOf(
+    "org.springframework",
+    "org.springdoc",
+    "springfox",
+    "io.swagger",
+    "org.apache",
+)
+
 /**
  * Walks Java/Kotlin types and produces internal WireType references plus
  * a registered set of top-level definitions (Object/Enum/Refined).
@@ -337,6 +345,10 @@ open class TypeExtractor {
      * resolving correctly (e.g., UserPage : Page<UserDto> resolves `content: T`
      * to `UserDto`).
      *
+     * Framework superclasses are excluded: their implementation details are not
+     * part of an application's wire shape and can contain unsupported generic
+     * internals, such as Avro's `Conversion<?>`.
+     *
      * Override-able by subclasses to inject extra processing per level.
      */
     protected open fun walkFields(cls: Class<*>): List<WireType.Field> {
@@ -345,7 +357,7 @@ open class TypeExtractor {
         var c: Class<*>? = cls
         while (c != null && c != Any::class.java && c != Object::class.java) {
             chain.add(c)
-            c = c.superclass
+            c = c.superclass?.takeUnless { it.isFrameworkClass() }
         }
 
         // Pre-compute shadowing: names declared by any descendant of level i
@@ -452,6 +464,9 @@ open class TypeExtractor {
 
     private fun Class<*>.declaredFieldOrNull(name: String): java.lang.reflect.Field? =
         try { getDeclaredField(name) } catch (_: NoSuchFieldException) { null }
+
+    private fun Class<*>.isFrameworkClass(): Boolean =
+        FRAMEWORK_PACKAGES.any { packageName == it || packageName.startsWith("$it.") }
 
     /**
      * Discover (name, generic-type) pairs for a class:

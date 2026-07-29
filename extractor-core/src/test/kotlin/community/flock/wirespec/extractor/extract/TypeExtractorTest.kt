@@ -1,6 +1,7 @@
 package community.flock.wirespec.extractor.extract
 
 import community.flock.wirespec.extractor.WirespecExtractorException
+import community.flock.wirespec.extractor.fixtures.avro.AvroGeneratedEvent
 import community.flock.wirespec.extractor.fixtures.dto.AccountId
 import community.flock.wirespec.extractor.fixtures.dto.Container
 import community.flock.wirespec.extractor.fixtures.dto.Nickname
@@ -573,6 +574,17 @@ class TypeExtractorTest {
         val parentFields = listOf("content", "totalElements", "number")
         val ownFields = listOf("pageLabel")
         obj.fields.map { it.name } shouldBe parentFields + ownFields
+    }
+
+    @Test
+    fun `framework superclass fields are not traversed`() {
+        extractor.extract(AvroGeneratedEvent::class.java)
+
+        val obj = extractor.definitions.single {
+            (it as? WireType.Object)?.name == "AvroGeneratedEvent"
+        } as WireType.Object
+        obj.fields.map { it.name } shouldBe listOf("payload")
+        extractor.definitions.map { definitionName(it) } shouldNotContain "GenericData"
     }
 
     @Test
