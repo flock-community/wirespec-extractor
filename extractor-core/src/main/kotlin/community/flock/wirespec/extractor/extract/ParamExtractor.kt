@@ -15,10 +15,13 @@ import org.springframework.web.bind.annotation.ValueConstants
 import java.lang.reflect.Method
 import java.lang.reflect.Parameter
 
-class ParamExtractor(private val types: TypeExtractor) {
+class ParamExtractor(
+    private val types: TypeExtractor,
+    private val onWarn: (String) -> Unit = {},
+) {
 
     fun extractParams(method: Method): List<Param> =
-        method.parameters.withIndex().mapNotNull { (index, p) -> toParam(method, index, p) }
+        method.parameters.withIndex().flatMap { (index, p) -> toParams(method, index, p) }
 
     fun extractRequestBody(method: Method): WireType? {
         method.parameters.forEachIndexed { index, p ->
@@ -30,26 +33,48 @@ class ParamExtractor(private val types: TypeExtractor) {
         return null
     }
 
-    private fun toParam(method: Method, index: Int, p: Parameter): Param? {
+    private fun toParams(method: Method, index: Int, p: Parameter): List<Param> {
         // Only extract the parameter's type once we've confirmed it's actually a Spring
         // binding parameter — otherwise we'd pollute TypeExtractor.definitions with
         // synthetic / framework parameters (notably Kotlin's `Continuation<? super T>`,
         // which would otherwise leak Continuation and CoroutineContext into the schema).
         findMergedParameterAnnotation(method, index, PathVariable::class.java)?.let { a ->
             // Path variables are part of the URL: Spring treats them as required.
-            return param(a.value.ifEmpty { a.name }.ifEmpty { p.name }, Source.PATH, p, springOptional = !a.required)
+            return listOf(param(a.value.ifEmpty { a.name }.ifEmpty { p.name }, Source.PATH, p, springOptional = !a.required))
         }
         findMergedParameterAnnotation(method, index, RequestParam::class.java)?.let { a ->
-            return param(a.value.ifEmpty { a.name }.ifEmpty { p.name }, Source.QUERY, p, springOptional = a.isOptional())
+            return listOf(param(a.value.ifEmpty { a.name }.ifEmpty { p.name }, Source.QUERY, p, springOptional = a.isOptional()))
         }
         findMergedParameterAnnotation(method, index, RequestHeader::class.java)?.let { a ->
-            return param(a.value.ifEmpty { a.name }.ifEmpty { p.name }, Source.HEADER, p, springOptional = a.isOptional())
+            return listOf(param(a.value.ifEmpty { a.name }.ifEmpty { p.name }, Source.HEADER, p, springOptional = a.isOptional()))
         }
         findMergedParameterAnnotation(method, index, CookieValue::class.java)?.let { a ->
-            return param(a.value.ifEmpty { a.name }.ifEmpty { p.name }, Source.COOKIE, p, springOptional = a.isOptional())
+            return listOf(param(a.value.ifEmpty { a.name }.ifEmpty { p.name }, Source.COOKIE, p, springOptional = a.isOptional()))
         }
-        return null
+        if (isParameterObject(method, index)) return flattenParameterObject(method, p)
+        return emptyList()
     }
+
+    /**
+     * springdoc's `@ParameterObject` marks a POJO whose properties Spring binds from
+     * individual query parameters (plain `@ModelAttribute`-style binding; the annotation
+     * itself only drives documentation). Flatten its bindable fields into QUERY params.
+     * The annotation is matched by FQN so springdoc is not a dependency of the extractor;
+     * projects without springdoc simply never hit it.
+     */
+    private fun isParameterObject(method: Method, index: Int): Boolean =
+        parameterDeclarations(method, index).any { declaration ->
+            declaration.annotations.any { it.annotationClass.java.name in PARAMETER_OBJECT_ANNOTATIONS }
+        }
+
+    private fun flattenParameterObject(method: Method, p: Parameter): List<Param> =
+        types.flattenQueryFields(p.type) { field ->
+            onWarn(
+                "${method.declaringClass.simpleName}.${method.name}: dropped @ParameterObject field " +
+                    "'${p.type.simpleName}.$field' — its type does not bind as a single query parameter, " +
+                    "and Wirespec cannot express nested ('$field.…') query names",
+            )
+        }.map { f -> Param(name = f.name, source = Source.QUERY, type = f.type) }
 
     /**
      * Merged-annotation lookup on a method parameter that also sees declarations the
@@ -98,4 +123,11 @@ class ParamExtractor(private val types: TypeExtractor) {
     private fun RequestParam.isOptional(): Boolean = !required || defaultValue != ValueConstants.DEFAULT_NONE
     private fun RequestHeader.isOptional(): Boolean = !required || defaultValue != ValueConstants.DEFAULT_NONE
     private fun CookieValue.isOptional(): Boolean = !required || defaultValue != ValueConstants.DEFAULT_NONE
+
+    private companion object {
+        val PARAMETER_OBJECT_ANNOTATIONS = setOf(
+            "org.springdoc.core.annotations.ParameterObject", // springdoc 2.x
+            "org.springdoc.api.annotations.ParameterObject", // springdoc 1.x
+        )
+    }
 }

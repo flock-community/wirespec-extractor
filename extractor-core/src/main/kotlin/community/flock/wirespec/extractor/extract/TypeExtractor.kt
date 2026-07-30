@@ -337,6 +337,51 @@ open class TypeExtractor {
     private fun currentContext(): String = "<unknown>"
 
     /**
+     * Fields of a springdoc `@ParameterObject`-style class that bind as individual query
+     * parameters: everything [walkFields] would emit except fields whose type is itself an
+     * object or a map — those would need a nested (`filter.name`) query name, which Wirespec
+     * identifiers cannot express. Skipped fields are reported through [onSkip], and their
+     * types are never walked. Unlike [extract], the class itself is not registered as a
+     * definition either: it has no wire shape of its own, its fields dissolve into the query.
+     */
+    internal fun flattenQueryFields(cls: Class<*>, onSkip: (fieldName: String) -> Unit): List<WireType.Field> =
+        walkFields(cls) { name, type ->
+            isQueryRepresentable(type).also { ok -> if (!ok) onSkip(name) }
+        }
+
+    /** Whether [type] binds as a single (possibly repeated, for collections) query parameter. */
+    private fun isQueryRepresentable(type: Type): Boolean = when (type) {
+        is Class<*> -> when {
+            Map::class.java.isAssignableFrom(type) -> false
+            Collection::class.java.isAssignableFrom(type) -> true // raw collection extracts as String[]
+            else -> !isPojoClass(type)
+        }
+        is ParameterizedType -> {
+            val raw = type.rawType as? Class<*>
+            when {
+                raw == null -> false
+                raw == Optional::class.java -> isQueryRepresentable(type.actualTypeArguments[0])
+                Collection::class.java.isAssignableFrom(raw) -> isQueryRepresentable(type.actualTypeArguments[0])
+                Map::class.java.isAssignableFrom(raw) -> false
+                else -> valueProperty(raw)?.let { isQueryRepresentable(it.genericType) } ?: false
+            }
+        }
+        else -> true // type variables and wildcards degrade to STRING in extractInner
+    }
+
+    /** The cases [fromClass] would register a definition for and recurse into. */
+    private fun isPojoClass(cls: Class<*>): Boolean {
+        if (primitiveOf(cls) != null) return false
+        if (cls == String::class.java || cls == ByteArray::class.java || cls == UUID::class.java || cls == Optional::class.java) return false
+        if (Enum::class.java.isAssignableFrom(cls)) return false
+        if (TemporalRefinements.regexFor(cls) != null) return false
+        if (isJdkOpaqueType(cls)) return false
+        // A value class is as bindable as its underlying value.
+        valueProperty(cls)?.let { return !isQueryRepresentable(it.genericType) }
+        return true
+    }
+
+    /**
      * Walk the inheritance chain of [cls] producing one [WireType.Field] per
      * (non-ignored, non-shadowed) property, parent-first. When a level's
      * declared superclass is parameterized, the corresponding type-variable
@@ -350,8 +395,14 @@ open class TypeExtractor {
      * internals, such as Avro's `Conversion<?>`.
      *
      * Override-able by subclasses to inject extra processing per level.
+     *
+     * Fields for which [include] returns false are dropped without their type being
+     * extracted (so nothing about them is registered as a definition).
      */
-    protected open fun walkFields(cls: Class<*>): List<WireType.Field> {
+    protected open fun walkFields(
+        cls: Class<*>,
+        include: (name: String, type: Type) -> Boolean = { _, _ -> true },
+    ): List<WireType.Field> {
         // chain[0] = leaf, chain[chain.size - 1] = topmost non-Object ancestor
         val chain = mutableListOf<Class<*>>()
         var c: Class<*>? = cls
@@ -422,6 +473,7 @@ open class TypeExtractor {
                     val field = level.declaredFieldOrNull(name)
                     val element: java.lang.reflect.AnnotatedElement = field ?: level
                     if (JacksonNames.isIgnored(element)) continue
+                    if (!include(name, type)) continue
 
                     val declaredClass = (type as? Class<*>) ?: ((type as? ParameterizedType)?.rawType as? Class<*>) ?: Any::class.java
                     val nullable = NullabilityResolver.isNullable(element, declaredClass)
