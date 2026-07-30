@@ -4,6 +4,7 @@ package community.flock.wirespec.extractor.extract
 import community.flock.wirespec.extractor.model.Param
 import community.flock.wirespec.extractor.model.Param.Source
 import community.flock.wirespec.extractor.model.WireType
+import org.springframework.core.ResolvableType
 import org.springframework.core.annotation.AnnotatedElementUtils
 import org.springframework.web.bind.annotation.CookieValue
 import org.springframework.web.bind.annotation.PathVariable
@@ -16,36 +17,76 @@ import java.lang.reflect.Parameter
 
 class ParamExtractor(private val types: TypeExtractor) {
 
-    fun extractParams(method: Method): List<Param> = method.parameters.mapNotNull(::toParam)
+    fun extractParams(method: Method): List<Param> =
+        method.parameters.withIndex().mapNotNull { (index, p) -> toParam(method, index, p) }
 
     fun extractRequestBody(method: Method): WireType? {
-        val p = method.parameters.firstOrNull {
-            AnnotatedElementUtils.isAnnotated(it, RequestBody::class.java.name)
-        } ?: return null
-        val required = AnnotatedElementUtils.findMergedAnnotation(p, RequestBody::class.java)?.required ?: true
-        val nullable = NullabilityResolver.isParameterNullable(p, springOptional = !required)
-        return types.extract(p.parameterizedType, nullable)
+        method.parameters.forEachIndexed { index, p ->
+            findMergedParameterAnnotation(method, index, RequestBody::class.java)?.let { a ->
+                val nullable = NullabilityResolver.isParameterNullable(p, springOptional = !a.required)
+                return types.extract(p.parameterizedType, nullable)
+            }
+        }
+        return null
     }
 
-    private fun toParam(p: Parameter): Param? {
+    private fun toParam(method: Method, index: Int, p: Parameter): Param? {
         // Only extract the parameter's type once we've confirmed it's actually a Spring
         // binding parameter — otherwise we'd pollute TypeExtractor.definitions with
         // synthetic / framework parameters (notably Kotlin's `Continuation<? super T>`,
         // which would otherwise leak Continuation and CoroutineContext into the schema).
-        AnnotatedElementUtils.findMergedAnnotation(p, PathVariable::class.java)?.let { a ->
+        findMergedParameterAnnotation(method, index, PathVariable::class.java)?.let { a ->
             // Path variables are part of the URL: Spring treats them as required.
             return param(a.value.ifEmpty { a.name }.ifEmpty { p.name }, Source.PATH, p, springOptional = !a.required)
         }
-        AnnotatedElementUtils.findMergedAnnotation(p, RequestParam::class.java)?.let { a ->
+        findMergedParameterAnnotation(method, index, RequestParam::class.java)?.let { a ->
             return param(a.value.ifEmpty { a.name }.ifEmpty { p.name }, Source.QUERY, p, springOptional = a.isOptional())
         }
-        AnnotatedElementUtils.findMergedAnnotation(p, RequestHeader::class.java)?.let { a ->
+        findMergedParameterAnnotation(method, index, RequestHeader::class.java)?.let { a ->
             return param(a.value.ifEmpty { a.name }.ifEmpty { p.name }, Source.HEADER, p, springOptional = a.isOptional())
         }
-        AnnotatedElementUtils.findMergedAnnotation(p, CookieValue::class.java)?.let { a ->
+        findMergedParameterAnnotation(method, index, CookieValue::class.java)?.let { a ->
             return param(a.value.ifEmpty { a.name }.ifEmpty { p.name }, Source.COOKIE, p, springOptional = a.isOptional())
         }
         return null
+    }
+
+    /**
+     * Merged-annotation lookup on a method parameter that also sees declarations the
+     * implementation inherits. Java does not inherit *parameter* annotations, so plain
+     * reflection on a controller that implements an annotated API interface shows nothing —
+     * but Spring binds those declarations at runtime (`HandlerMethod.getInterfaceParameterAnnotations`),
+     * so the extractor must see them too. Mirrors Spring's lookup order: the implementation's
+     * own parameter wins, then the same parameter of each method it overrides on the
+     * interfaces of its class hierarchy. Parameter annotations on overridden *superclass*
+     * methods stay invisible, as they are to Spring.
+     */
+    private fun <A : Annotation> findMergedParameterAnnotation(method: Method, index: Int, type: Class<A>): A? =
+        parameterDeclarations(method, index).firstNotNullOfOrNull {
+            AnnotatedElementUtils.findMergedAnnotation(it, type)
+        }
+
+    private fun parameterDeclarations(method: Method, index: Int): Sequence<Parameter> = sequence {
+        yield(method.parameters[index])
+        var clazz: Class<*>? = method.declaringClass
+        while (clazz != null) {
+            for (ifc in clazz.interfaces) {
+                for (candidate in ifc.methods) {
+                    if (isOverrideFor(method, candidate)) yield(candidate.parameters[index])
+                }
+            }
+            clazz = clazz.superclass
+        }
+    }
+
+    /** Whether [method] overrides [candidate], resolving the candidate's generic parameters against the implementation. */
+    private fun isOverrideFor(method: Method, candidate: Method): Boolean {
+        if (candidate.name != method.name || candidate.parameterCount != method.parameterCount) return false
+        val paramTypes = method.parameterTypes
+        if (candidate.parameterTypes.contentEquals(paramTypes)) return true
+        return paramTypes.indices.all { i ->
+            paramTypes[i] == ResolvableType.forMethodParameter(candidate, i, method.declaringClass).resolve()
+        }
     }
 
     private fun param(name: String, source: Source, p: Parameter, springOptional: Boolean): Param {
