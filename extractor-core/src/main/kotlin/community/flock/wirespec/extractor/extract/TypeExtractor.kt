@@ -2,6 +2,7 @@ package community.flock.wirespec.extractor.extract
 
 import community.flock.wirespec.extractor.WirespecExtractorException
 import community.flock.wirespec.extractor.model.WireType
+import java.lang.reflect.GenericArrayType
 import java.lang.reflect.ParameterizedType
 import java.lang.reflect.Type
 import java.lang.reflect.TypeVariable
@@ -51,6 +52,8 @@ open class TypeExtractor {
     private fun extractInner(type: Type, nullable: Boolean): WireType = when (type) {
         is Class<*>          -> fromClass(type, nullable)
         is ParameterizedType -> fromParameterized(type, nullable)
+        // T[] / List<String>[] — an array whose component is generic.
+        is GenericArrayType  -> WireType.ListOf(extractInner(type.genericComponentType, nullable = false), nullable)
         is WildcardType      -> extractInner(type.upperBounds.firstOrNull() ?: Any::class.java, nullable)
         is TypeVariable<*>   -> resolveBinding(type)
             ?.let { extractInner(it, nullable) }
@@ -98,6 +101,10 @@ open class TypeExtractor {
         primitiveOf(cls)?.let { return it.copy(nullable = nullable) }
         if (cls == String::class.java) return WireType.Primitive(WireType.Primitive.Kind.STRING, nullable)
         if (cls == ByteArray::class.java) return WireType.Primitive(WireType.Primitive.Kind.BYTES, nullable)
+        // Any other array (String[], UUID[], Foo[], int[]) serializes as a JSON list, same as
+        // a Collection. Without this, an array class fell through to the object branch, walked
+        // zero fields, and the empty-type rewrite collapsed the whole field to Unit.
+        if (cls.isArray) return WireType.ListOf(extractInner(cls.componentType, nullable = false), nullable)
         if (cls == UUID::class.java) return WireType.Primitive(WireType.Primitive.Kind.STRING, nullable)
         // Raw Optional (no type argument) — an opaque, inherently nullable value.
         if (cls == Optional::class.java) return WireType.Primitive(WireType.Primitive.Kind.STRING, nullable = true)
