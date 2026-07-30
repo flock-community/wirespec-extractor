@@ -3,6 +3,7 @@ package community.flock.wirespec.extractor.extract
 import community.flock.wirespec.extractor.WirespecExtractorException
 import community.flock.wirespec.extractor.fixtures.avro.AvroGeneratedEvent
 import community.flock.wirespec.extractor.fixtures.dto.AccountId
+import community.flock.wirespec.extractor.fixtures.dto.ArrayDto
 import community.flock.wirespec.extractor.fixtures.dto.Container
 import community.flock.wirespec.extractor.fixtures.dto.Nickname
 import community.flock.wirespec.extractor.fixtures.dto.Owner
@@ -669,6 +670,43 @@ class TypeExtractorTest {
         byName["first"]!!.type shouldBe WireType.Primitive(WireType.Primitive.Kind.STRING)
         byName["items"]!!.type.shouldBeInstanceOf<WireType.ListOf>().element shouldBe
             WireType.Primitive(WireType.Primitive.Kind.STRING)
+    }
+
+    @Test
+    fun `array types extract as lists, like Collections`() {
+        extractor.extract(Array<String>::class.java) shouldBe
+            WireType.ListOf(WireType.Primitive(WireType.Primitive.Kind.STRING))
+        extractor.extract(IntArray::class.java) shouldBe
+            WireType.ListOf(WireType.Primitive(WireType.Primitive.Kind.INTEGER_32))
+        // ByteArray is the one exception: it stays an opaque BYTES value.
+        extractor.extract(ByteArray::class.java) shouldBe
+            WireType.Primitive(WireType.Primitive.Kind.BYTES)
+    }
+
+    @Test
+    fun `array of enum registers the element definition`() {
+        val out = extractor.extract(Array<Role>::class.java)
+        out.shouldBeInstanceOf<WireType.ListOf>().element.shouldBeInstanceOf<WireType.Ref>().name shouldBe "Role"
+        extractor.definitions.map { definitionName(it) } shouldContain "Role"
+    }
+
+    @Test
+    fun `array fields inside an object extract as list fields`() {
+        // Without array handling these fell through to the object branch, walked zero
+        // fields, and the empty-type rewrite collapsed each field to Unit.
+        extractor.extract(ArrayDto::class.java)
+        val obj = extractor.definitions.single { (it as? WireType.Object)?.name == "ArrayDto" } as WireType.Object
+        val byName = obj.fields.associateBy { it.name }
+
+        byName["names"]!!.type shouldBe WireType.ListOf(WireType.Primitive(WireType.Primitive.Kind.STRING))
+        byName["ids"]!!.type shouldBe
+            WireType.ListOf(WireType.Primitive(WireType.Primitive.Kind.STRING), nullable = true)
+        byName["counts"]!!.type shouldBe WireType.ListOf(WireType.Primitive(WireType.Primitive.Kind.INTEGER_32))
+        byName["roles"]!!.type.shouldBeInstanceOf<WireType.ListOf>().element.shouldBeInstanceOf<WireType.Ref>().name shouldBe "Role"
+        byName["payload"]!!.type shouldBe WireType.Primitive(WireType.Primitive.Kind.BYTES)
+        // Array<List<String>> reaches reflection as a GenericArrayType.
+        byName["matrix"]!!.type shouldBe
+            WireType.ListOf(WireType.ListOf(WireType.Primitive(WireType.Primitive.Kind.STRING)))
     }
 
     @Test
