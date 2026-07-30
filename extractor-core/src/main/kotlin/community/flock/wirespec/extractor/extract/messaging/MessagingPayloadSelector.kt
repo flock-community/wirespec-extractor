@@ -61,7 +61,14 @@ internal object MessagingPayloadSelector {
     }
 
     private fun unwrap(t: Type, broker: MessagingBroker): Result {
-        if (t is WildcardType) return Result.Skipped("wildcard payload")
+        if (t is WildcardType) {
+            // Kotlin's declaration-site covariance compiles `List<ConsumerRecord<K, V>>` to
+            // `List<? extends ConsumerRecord<K, V>>` (for non-final arguments), so a bounded
+            // wildcard unwraps to its bound; only a bare `?` is unrecoverable.
+            val upper = t.upperBounds.singleOrNull()?.takeIf { it != Object::class.java }
+                ?: return Result.Skipped("wildcard payload")
+            return unwrap(upper, broker)
+        }
         if (t is Class<*>) {
             // Raw (un-parameterized) wrapper → value type unrecoverable.
             if (t.name == MESSAGE_FQN || t.name == LIST_FQN || broker.recordWrappers.any { it.fqn == t.name }) {
