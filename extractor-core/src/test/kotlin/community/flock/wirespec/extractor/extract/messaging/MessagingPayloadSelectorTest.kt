@@ -18,6 +18,7 @@ class MessagingPayloadSelectorTest {
         fun withRecord(rec: ConsumerRecord<String, OrderEvent>) {}
         fun withMessage(msg: Message<OrderEvent>) {}
         fun batch(events: List<OrderEvent>) {}
+        fun batchRecords(records: List<ConsumerRecord<String, OrderEvent>>) {}
         fun withPayloadAnnotation(@Payload event: OrderEvent, @Header("k") key: String) {}
         fun ambiguousTwoPayloads(a: OrderEvent, b: OrderEvent) {}
     }
@@ -56,6 +57,12 @@ class MessagingPayloadSelectorTest {
 
     @Test fun `kafka unwraps List for batch`() {
         selected(KafkaFixtures::class.java, "batch", MessagingBroker.KAFKA) shouldBe OrderEvent::class.java
+    }
+
+    // Kotlin compiles the List argument to `? extends ConsumerRecord<...>` (ConsumerRecord is
+    // not final), so this also covers the covariance wildcard around the record wrapper.
+    @Test fun `kafka unwraps batched ConsumerRecords to V`() {
+        selected(KafkaFixtures::class.java, "batchRecords", MessagingBroker.KAFKA) shouldBe OrderEvent::class.java
     }
 
     @Test fun `kafka Payload annotation wins`() {
