@@ -1,8 +1,11 @@
 // src/test/kotlin/community/flock/wirespec/extractor/extract/ParamExtractorTest.kt
 package community.flock.wirespec.extractor.extract
 
+import community.flock.wirespec.extractor.fixtures.InterfaceParamsController
 import community.flock.wirespec.extractor.fixtures.NullableParamsController
+import community.flock.wirespec.extractor.fixtures.OverridingParamsController
 import community.flock.wirespec.extractor.fixtures.ParamsController
+import community.flock.wirespec.extractor.fixtures.StringCrudController
 import community.flock.wirespec.extractor.fixtures.SuspendController
 import community.flock.wirespec.extractor.model.Param.Source
 import community.flock.wirespec.extractor.model.WireType
@@ -133,6 +136,43 @@ class ParamExtractorTest {
 
         pe.extractRequestBody(nullableBody)!!.nullable shouldBe true
         pe.extractRequestBody(requiredBody)!!.nullable shouldBe false
+    }
+
+    @Test
+    fun `sees @RequestParam declared on the implemented interface`() {
+        // Java does not inherit parameter annotations, so the implementation's own
+        // parameters carry nothing; Spring still binds these at runtime.
+        val m = InterfaceParamsController::class.java.getDeclaredMethod(
+            "search", String::class.java, Boolean::class.javaObjectType,
+        )
+        val params = pe.extractParams(m).associateBy { it.name }
+
+        params.keys shouldBe setOf("externalId", "includeInactive")
+        params.getValue("externalId").source shouldBe Source.QUERY
+        params.getValue("externalId").type.nullable shouldBe false
+        // required = false on the interface + nullable Kotlin type → nullable.
+        params.getValue("includeInactive").type.nullable shouldBe true
+    }
+
+    @Test
+    fun `sees @RequestBody declared on the implemented interface`() {
+        val m = InterfaceParamsController::class.java.getDeclaredMethod("searchPost", String::class.java)
+        pe.extractRequestBody(m) shouldBe WireType.Primitive(WireType.Primitive.Kind.STRING)
+    }
+
+    @Test
+    fun `resolves the overridden method through a generic interface`() {
+        // CrudApi<T>.create(entity: T) erases to create(Object); the override only matches
+        // after resolving T against the implementation.
+        val m = StringCrudController::class.java.getDeclaredMethod("create", String::class.java)
+        pe.extractRequestBody(m) shouldBe WireType.Primitive(WireType.Primitive.Kind.STRING)
+    }
+
+    @Test
+    fun `the implementation's own parameter annotation wins over the interface's`() {
+        val m = OverridingParamsController::class.java.getDeclaredMethod("search", String::class.java)
+        val params = pe.extractParams(m)
+        params.single().name shouldBe "implName"
     }
 
     private fun definitionName(w: WireType): String? = when (w) {
