@@ -1,17 +1,22 @@
 // src/test/kotlin/community/flock/wirespec/extractor/extract/ParamExtractorTest.kt
 package community.flock.wirespec.extractor.extract
 
+import community.flock.wirespec.extractor.fixtures.InterfaceParameterObjectController
 import community.flock.wirespec.extractor.fixtures.InterfaceParamsController
 import community.flock.wirespec.extractor.fixtures.NullableParamsController
 import community.flock.wirespec.extractor.fixtures.OverridingParamsController
+import community.flock.wirespec.extractor.fixtures.ParameterObjectController
 import community.flock.wirespec.extractor.fixtures.ParamsController
+import community.flock.wirespec.extractor.fixtures.ProductSearchRequest
 import community.flock.wirespec.extractor.fixtures.StringCrudController
 import community.flock.wirespec.extractor.fixtures.SuspendController
 import community.flock.wirespec.extractor.model.Param.Source
 import community.flock.wirespec.extractor.model.WireType
+import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
 
 class ParamExtractorTest {
@@ -173,6 +178,43 @@ class ParamExtractorTest {
         val m = OverridingParamsController::class.java.getDeclaredMethod("search", String::class.java)
         val params = pe.extractParams(m)
         params.single().name shouldBe "implName"
+    }
+
+    @Test
+    fun `@ParameterObject fields flatten into individual query params`() {
+        val m = ParameterObjectController::class.java.getDeclaredMethod("search", ProductSearchRequest::class.java)
+        val params = ParamExtractor(TypeExtractor()).extractParams(m).associateBy { it.name }
+
+        params.values.map { it.source }.toSet() shouldBe setOf(Source.QUERY)
+        params.keys shouldBe setOf("externalId", "includeInactive", "page", "tags")
+        params.getValue("externalId").type shouldBe WireType.Primitive(WireType.Primitive.Kind.STRING, nullable = true)
+        params.getValue("includeInactive").type shouldBe WireType.Primitive(WireType.Primitive.Kind.BOOLEAN, nullable = true)
+        params.getValue("page").type shouldBe WireType.Primitive(WireType.Primitive.Kind.INTEGER_32)
+        params.getValue("tags").type shouldBe
+            WireType.ListOf(WireType.Primitive(WireType.Primitive.Kind.STRING), nullable = true)
+    }
+
+    @Test
+    fun `@ParameterObject nested object field is dropped with a warning, not registered`() {
+        val types = TypeExtractor()
+        val warnings = mutableListOf<String>()
+        val m = ParameterObjectController::class.java.getDeclaredMethod("search", ProductSearchRequest::class.java)
+
+        val params = ParamExtractor(types, onWarn = warnings::add).extractParams(m)
+
+        params.map { it.name } shouldNotContain "filter"
+        warnings.single() shouldContain "ProductSearchRequest.filter"
+        // Neither the parameter object nor the skipped nested type is a wire shape.
+        val defNames = types.definitions.map { definitionName(it) }
+        defNames shouldNotContain "ProductSearchRequest"
+        defNames shouldNotContain "NestedFilter"
+    }
+
+    @Test
+    fun `@ParameterObject declared on the implemented interface flattens too`() {
+        val m = InterfaceParameterObjectController::class.java.getDeclaredMethod("search", ProductSearchRequest::class.java)
+        val params = pe.extractParams(m)
+        params.map { it.name } shouldContainExactlyInAnyOrder listOf("externalId", "includeInactive", "page", "tags")
     }
 
     private fun definitionName(w: WireType): String? = when (w) {
