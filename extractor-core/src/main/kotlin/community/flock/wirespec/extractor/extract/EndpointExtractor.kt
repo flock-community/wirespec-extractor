@@ -16,7 +16,7 @@ class EndpointExtractor(
     private val onWarn: (String) -> Unit = {},
 ) {
 
-    private val params = ParamExtractor(types)
+    private val params = ParamExtractor(types, onWarn)
     private val apiResponses = ApiResponseExtractor(types, onWarn)
 
     fun extract(controllerClass: Class<*>): List<Endpoint> {
