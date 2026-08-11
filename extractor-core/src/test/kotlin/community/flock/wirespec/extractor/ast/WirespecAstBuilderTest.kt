@@ -88,4 +88,11 @@ class WirespecAstBuilderTest {
         ref.isNullable shouldBe true
         ref.value shouldBe "X"
     }
+
+    @Test
+    fun `nullable Any becomes Wirespec Any with isNullable=true`() {
+        val ref = builder.toReference(WireType.Any(nullable = true))
+        ref.shouldBeInstanceOf<Reference.Any>()
+        ref.isNullable shouldBe true
+    }
 }

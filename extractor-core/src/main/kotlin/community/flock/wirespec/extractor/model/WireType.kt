@@ -5,6 +5,8 @@ package community.flock.wirespec.extractor.model
 sealed interface WireType {
     val nullable: Boolean
 
+    data class Any(override val nullable: Boolean = false) : WireType
+
     data class Primitive(val kind: Kind, override val nullable: Boolean = false) : WireType {
         enum class Kind { STRING, INTEGER_32, INTEGER_64, NUMBER_32, NUMBER_64, BOOLEAN, BYTES }
     }

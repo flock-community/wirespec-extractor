@@ -55,6 +55,30 @@ class TypeExtractorTest {
     }
 
     @Test
+    fun `Any maps to Any rather than STRING`() {
+        extractor.extract(Any::class.java) shouldBe WireType.Any()
+        extractor.extract(Any::class.java, nullable = true) shouldBe WireType.Any(nullable = true)
+    }
+
+    @Test
+    fun `Any fields preserve their declared nullability`() {
+        extractor.extract(AnyHolder::class.java)
+
+        val holder = extractor.definitions
+            .filterIsInstance<WireType.Object>()
+            .single { it.name == "AnyHolder" }
+        holder.fields.associate { it.name to it.type } shouldBe mapOf(
+            "required" to WireType.Any(),
+            "optional" to WireType.Any(nullable = true),
+        )
+    }
+
+    data class AnyHolder(
+        val required: Any,
+        val optional: Any?,
+    )
+
+    @Test
     fun `Int maps to INTEGER_32 primitive`() {
         extractor.extract(Int::class.javaPrimitiveType!!) shouldBe WireType.Primitive(WireType.Primitive.Kind.INTEGER_32)
     }
