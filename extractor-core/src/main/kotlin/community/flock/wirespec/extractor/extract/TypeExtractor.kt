@@ -95,6 +95,7 @@ open class TypeExtractor {
         claim(composed, "${rawClass.name}#$composed")
 
     private fun fromClass(cls: Class<*>, nullable: Boolean): WireType {
+        if (cls == Any::class.java) return WireType.Any(nullable)
         primitiveOf(cls)?.let { return it.copy(nullable = nullable) }
         if (cls == String::class.java) return WireType.Primitive(WireType.Primitive.Kind.STRING, nullable)
         if (cls == ByteArray::class.java) return WireType.Primitive(WireType.Primitive.Kind.BYTES, nullable)
@@ -452,6 +453,7 @@ open class TypeExtractor {
     private fun withNullability(t: WireType, nullable: Boolean): WireType {
         val n = nullable || t.nullable
         return when (t) {
+            is WireType.Any       -> t.copy(nullable = n)
             is WireType.Primitive -> t.copy(nullable = n)
             is WireType.Ref       -> t.copy(nullable = n)
             is WireType.ListOf    -> t.copy(nullable = n)
@@ -502,7 +504,7 @@ open class TypeExtractor {
      * (BigDecimal, BigInteger), `java.net.URI/URL`, `java.util.Date`/`Calendar`,
      * `java.sql.*` temporal types, and anything else shipped in the `java.*` /
      * `jdk.*` / `sun.*` namespaces that we haven't already mapped above
-     * (primitives, String, ByteArray, UUID, Enum, Collection).
+     * (Any, primitives, String, ByteArray, UUID, Enum, Collection).
      */
     private fun isJdkOpaqueType(cls: Class<*>): Boolean {
         val pkg = cls.`package`?.name ?: return false

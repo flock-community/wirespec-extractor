@@ -83,6 +83,7 @@ class WirespecAstBuilder {
     }
 
     fun toReference(wt: WireType): Reference = when (wt) {
+        is WireType.Any       -> Reference.Any(wt.nullable)
         is WireType.Primitive -> primitiveRef(wt)
         is WireType.Ref       -> Reference.Custom(wt.name, wt.nullable)
         is WireType.ListOf    -> Reference.Iterable(toReference(wt.element), wt.nullable)
