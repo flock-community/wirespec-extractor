@@ -420,8 +420,12 @@ open class TypeExtractor {
                 for ((name, type) in propertyMembers(level)) {
                     if (name in shadowedAt[i]) continue
                     if (!seen.add(name)) continue
+                    // Annotations and nullability come off the member the property is
+                    // declared by: its field, or its accessor when there is no field to read
+                    // (a delegated property, a JavaBean getter).
                     val field = level.declaredFieldOrNull(name)
-                    val element: java.lang.reflect.AnnotatedElement = field ?: level
+                    val element: java.lang.reflect.AnnotatedElement =
+                        field ?: level.accessorFor(name) ?: level
                     if (JacksonNames.isIgnored(element)) continue
 
                     val declaredClass = (type as? Class<*>) ?: ((type as? ParameterizedType)?.rawType as? Class<*>) ?: Any::class.java
@@ -467,13 +471,26 @@ open class TypeExtractor {
     private fun Class<*>.declaredFieldOrNull(name: String): java.lang.reflect.Field? =
         try { getDeclaredField(name) } catch (_: NoSuchFieldException) { null }
 
+    /**
+     * The public zero-argument accessor declared by this class for [property], or null when
+     * the property is not readable from outside (a private delegated property, for instance).
+     */
+    private fun Class<*>.accessorFor(property: String): java.lang.reflect.Method? =
+        declaredMethods.firstOrNull {
+            it.parameterCount == 0
+                && !java.lang.reflect.Modifier.isStatic(it.modifiers)
+                && java.lang.reflect.Modifier.isPublic(it.modifiers)
+                && property in KotlinNames.accessorPropertyNames(it.name)
+        }
+
     private fun Class<*>.isFrameworkClass(): Boolean =
         FRAMEWORK_PACKAGES.any { packageName == it || packageName.startsWith("$it.") }
 
     /**
      * Discover (name, generic-type) pairs for a class:
      * 1. Java records: record components.
-     * 2. Kotlin data classes: declared fields (Kotlin generates fields for properties).
+     * 2. Kotlin data classes: declared fields (Kotlin generates fields for properties),
+     *    with a delegated property's `<name>$delegate` field read off its accessor instead.
      * 3. JavaBeans: getters paired with backing fields.
      */
     protected fun propertyMembers(cls: Class<*>): List<Pair<String, Type>> {
@@ -483,7 +500,15 @@ open class TypeExtractor {
         // Kotlin data classes / POJOs: prefer declared non-static, non-synthetic fields.
         val declared = cls.declaredFields
             .filter { !java.lang.reflect.Modifier.isStatic(it.modifiers) && !it.isSynthetic }
-            .map { it.name to it.genericType }
+            .mapNotNull { field ->
+                // A delegated property (`val rate by lazy { … }`) stores its delegate, not its
+                // value: the field is `rate$delegate: kotlin.Lazy`. Take the wire type from the
+                // accessor — that is what Jackson serializes — and drop the property when there
+                // is no public accessor to read it from.
+                val delegated = KotlinNames.delegatedPropertyName(field.name)
+                    ?: return@mapNotNull field.name to field.genericType
+                cls.accessorFor(delegated)?.let { delegated to it.genericReturnType }
+            }
         if (declared.isNotEmpty()) return declared
         // Pure JavaBean: getXxx / isXxx pairs.
         return cls.methods

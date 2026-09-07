@@ -9,6 +9,7 @@ import java.lang.reflect.Field
 import java.lang.reflect.Method
 import java.lang.reflect.Parameter
 import java.util.Optional
+import kotlin.reflect.KProperty
 import kotlin.reflect.full.valueParameters
 import kotlin.reflect.jvm.kotlinFunction
 
@@ -80,15 +81,26 @@ object NullabilityResolver {
         element.getAnnotation(Schema::class.java)?.description?.takeIf { it.isNotBlank() }
 
     /**
-     * Read Kotlin's @Metadata to determine nullability for a property field.
-     * Returns null when this isn't a Kotlin class member.
+     * Read Kotlin's @Metadata to determine nullability for a property, addressed either by
+     * its backing field or by its accessor — a delegated or computed property has no field
+     * of its own. Returns null when this isn't a Kotlin class member.
+     *
+     * Kotlin's own `@NotNull` / `@Nullable` on the accessor cannot serve here: they carry
+     * CLASS retention and are invisible to reflection.
      */
     private fun kotlinNullable(element: AnnotatedElement): Boolean? {
-        val field = element as? Field ?: return null
-        val owner = field.declaringClass
+        val (owner, names) = when (element) {
+            is Field  -> element.declaringClass to listOf(element.name)
+            is Method -> element.declaringClass to KotlinNames.accessorPropertyNames(element.name)
+            else      -> return null
+        }
+        if (names.isEmpty()) return null
         if (!owner.isAnnotationPresent(Metadata::class.java)) return null
         val kClass = try { owner.kotlin } catch (_: Throwable) { return null }
-        val prop = kClass.members.firstOrNull { it.name == field.name } ?: return null
+        val prop = kClass.members
+            .filterIsInstance<KProperty<*>>()
+            .firstOrNull { it.name in names }
+            ?: return null
         return prop.returnType.isMarkedNullable
     }
 
