@@ -4,8 +4,10 @@ import community.flock.wirespec.extractor.WirespecExtractorException
 import community.flock.wirespec.extractor.fixtures.avro.AvroGeneratedEvent
 import community.flock.wirespec.extractor.fixtures.dto.AccountId
 import community.flock.wirespec.extractor.fixtures.dto.Container
+import community.flock.wirespec.extractor.fixtures.dto.DelegatedDto
 import community.flock.wirespec.extractor.fixtures.dto.Nickname
 import community.flock.wirespec.extractor.fixtures.dto.Owner
+import community.flock.wirespec.extractor.fixtures.dto.Report
 import community.flock.wirespec.extractor.fixtures.dto.Role
 import community.flock.wirespec.extractor.fixtures.dto.Score
 import community.flock.wirespec.extractor.fixtures.dto.Tags
@@ -719,5 +721,34 @@ class TypeExtractorTest {
         val names = extractor.definitions.map { definitionName(it) }
         names shouldNotContain "UserId"
         names shouldNotContain "Boxed"
+    }
+
+    @Test
+    fun `delegated property is taken from its accessor, not from the Lazy delegate field`() {
+        val ref = extractor.extract(Report::class.java)
+        ref.shouldBeInstanceOf<WireType.Ref>().name shouldBe "Report"
+
+        val obj = extractor.definitions.single { (it as? WireType.Object)?.name == "Report" } as WireType.Object
+        obj.fields.associate { it.name to it.type } shouldBe mapOf(
+            "clickThroughRate" to WireType.Primitive(WireType.Primitive.Kind.NUMBER_64),
+            "impressions" to WireType.Primitive(WireType.Primitive.Kind.INTEGER_32),
+            "label" to WireType.Primitive(WireType.Primitive.Kind.STRING),
+        )
+        // The `clickThroughRate$delegate: kotlin.Lazy` backing field must leave no trace.
+        obj.fields.map { it.name } shouldNotContain "clickThroughRate\$delegate"
+        extractor.definitions.map { definitionName(it) } shouldNotContain "Lazy"
+    }
+
+    @Test
+    fun `delegated properties keep their declared nullability and drop private ones`() {
+        extractor.extract(DelegatedDto::class.java)
+
+        val obj = extractor.definitions.single { (it as? WireType.Object)?.name == "DelegatedDto" } as WireType.Object
+        obj.fields.associate { it.name to it.type } shouldBe mapOf(
+            "id" to WireType.Primitive(WireType.Primitive.Kind.STRING),
+            "slug" to WireType.Primitive(WireType.Primitive.Kind.STRING),
+            "alias" to WireType.Primitive(WireType.Primitive.Kind.STRING, nullable = true),
+            "isPublished" to WireType.Primitive(WireType.Primitive.Kind.BOOLEAN),
+        )
     }
 }

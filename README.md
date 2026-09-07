@@ -208,6 +208,9 @@ path on one classpath.
 - Kotlin `@JvmInline value class` wrappers, flattened to the value they wrap
   rather than emitted as one-field types. See
   [Kotlin value classes](#kotlin-value-classes).
+- Kotlin delegated properties (`val rate by lazy { … }`), read from their
+  accessor instead of from the compiler-generated delegate field. See
+  [Kotlin delegated properties](#kotlin-delegated-properties).
 - Date and time types with a string wire form — `java.time` and the older
   `java.util` / `java.sql` ones — emitted as refined Strings pinned to that
   shape rather than as bare `String`s. See
@@ -291,6 +294,35 @@ so `val id: UserId` reaches the extractor as a plain `String` either way. The
 wrapper survives — and is flattened here — where it stays boxed: generic
 arguments (`List<UserId>`, `ResponseEntity<UserId>`) and nullable positions
 (`UserId?`).
+
+### Kotlin delegated properties
+
+A delegated property is not stored as its own value: the compiler emits a
+private `<name>$delegate` field holding the delegate — `kotlin.Lazy`, a
+`ReadWriteProperty`, … — and routes reads through the property's accessor.
+
+```kotlin
+abstract class Metric {
+    abstract val impressions: Int
+
+    val clickThroughRate by lazy {
+        if (impressions > 0) 1.0 / impressions else 0.0
+    }
+}
+
+data class Report(override val impressions: Int) : Metric()
+```
+
+```wirespec
+type Report {
+  clickThroughRate: Number,
+  impressions: Integer
+}
+```
+
+The wire type comes from the accessor — what Jackson serializes — so the
+delegate's own type never reaches the spec. A delegated property with no
+public accessor (`private val secret by lazy { … }`) is left out entirely.
 
 ### Date and time types
 
