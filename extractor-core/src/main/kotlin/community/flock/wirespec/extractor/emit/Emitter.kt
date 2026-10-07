@@ -4,10 +4,12 @@ package community.flock.wirespec.extractor.emit
 import arrow.core.NonEmptyList
 import arrow.core.toNonEmptyListOrNull
 import community.flock.wirespec.compiler.core.FileUri
+import community.flock.wirespec.compiler.core.parse.ast.Annotation
 import community.flock.wirespec.compiler.core.parse.ast.Channel
 import community.flock.wirespec.compiler.core.parse.ast.Definition
 import community.flock.wirespec.compiler.core.parse.ast.DefinitionIdentifier
 import community.flock.wirespec.compiler.core.parse.ast.Endpoint
+import community.flock.wirespec.compiler.core.parse.ast.Field
 import community.flock.wirespec.compiler.core.parse.ast.FieldIdentifier
 import community.flock.wirespec.compiler.core.parse.ast.Identifier
 import community.flock.wirespec.compiler.core.parse.ast.Module
@@ -23,10 +25,14 @@ import java.io.File
 class Emitter {
 
     /**
-     * Custom emitter that also backticks field names starting with `_`.
+     * Custom emitter that also backticks field names starting with `_`, and renders
+     * annotations on RPCs and fields.
+     *
      * The upstream [WirespecEmitter] already backticks names that are reserved
      * keywords or start with an uppercase letter, but Wirespec syntax also
-     * requires underscore-leading field names to be quoted.
+     * requires underscore-leading field names to be quoted. It parses annotations
+     * but does not emit them, so an RPC's `@Query` and a field's `@Default(20)`
+     * would otherwise be lost.
      */
     private val emitter = object : WirespecEmitter() {
         override fun emit(identifier: Identifier): String {
@@ -34,6 +40,17 @@ class Emitter {
                 return "`${identifier.value}`"
             }
             return super.emit(identifier)
+        }
+
+        override fun emit(rpc: Rpc): String =
+            rpc.annotations.joinToString("") { "${it.render()}\n" } + super.emit(rpc)
+
+        // Same as the upstream rendering, behind the field's annotations. A string field's
+        // values are always quoted, so `@Default("draft")` doesn't read as an enum entry.
+        override fun Field.emit(): String {
+            val quoted = reference is Reference.Primitive &&
+                (reference as Reference.Primitive).type is Reference.Primitive.Type.String
+            return annotations.joinToString("") { "${it.render(quoted)} " } + "${emit(identifier)}: ${reference.emit()}"
         }
     }
     private val logger: Logger = noLogger
@@ -102,6 +119,22 @@ class Emitter {
             )
         )
         return emitter.emit(ast, logger).head.result
+    }
+
+    /** `@Name`, `@Name(value)`, or `@Name(key: value, …)` — the syntax Wirespec parses. */
+    private fun Annotation.render(quoted: Boolean = false): String {
+        if (parameters.isEmpty()) return "@$name"
+        val args = parameters.joinToString(", ") { p ->
+            (if (p.name == "default") "" else "${p.name}: ") + p.value.render(quoted)
+        }
+        return "@$name($args)"
+    }
+
+    private fun Annotation.Value.render(quoted: Boolean): String = when (this) {
+        // Numbers, booleans, and identifiers (enum entries) stay bare unless [quoted]; anything else is quoted.
+        is Annotation.Value.Single -> if (!quoted && BARE_VALUE.matches(value)) value else "\"$value\""
+        is Annotation.Value.Array -> value.joinToString(", ", "[", "]") { it.render(quoted) }
+        is Annotation.Value.Dict -> value.joinToString(", ", "{", "}") { "${it.name}: ${it.value.render(quoted)}" }
     }
 
     private fun clearExistingWs(dir: File) {
@@ -245,4 +278,8 @@ class Emitter {
 
     /** Endpoints, channels, and RPCs: the renameable leaves of the reference graph. */
     private fun Definition.isOperation(): Boolean = this is Endpoint || this is Channel || this is Rpc
+
+    private companion object {
+        val BARE_VALUE = Regex("true|false|[0-9]+(\\.[0-9]+)?|[A-Za-z_][A-Za-z0-9_]*")
+    }
 }

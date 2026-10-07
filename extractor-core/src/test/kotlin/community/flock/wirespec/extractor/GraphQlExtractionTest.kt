@@ -1,5 +1,11 @@
 package community.flock.wirespec.extractor
 
+import arrow.core.nonEmptyListOf
+import community.flock.wirespec.compiler.core.FileUri
+import community.flock.wirespec.compiler.core.ModuleContent
+import community.flock.wirespec.compiler.core.ParseContext
+import community.flock.wirespec.compiler.core.parse
+import community.flock.wirespec.compiler.utils.noLogger
 import community.flock.wirespec.extractor.fixtures.graphql.BookController
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.shouldBe
@@ -32,35 +38,58 @@ class GraphQlExtractionTest {
 
         val ws = files.single { it.name == "BookController.ws" }.readText()
         ws shouldContain """
+            |@Query
             |rpc BookById {
             |  id: String
             |} -> Book?
         """.trimMargin()
-        ws shouldContain "rpc BookCount {} -> Integer32"
-        ws shouldContain "rpc DeleteBook {\n  bookId: String\n} -> Unit"
-        ws shouldContain "rpc BookAdded {\n  genre: Genre?\n} -> Book"
-        ws shouldContain "rpc SearchBooks {"
-        ws shouldContain "} -> Book[]"
+        ws shouldContain "@Query\nrpc BookCount {} -> Integer32"
+        ws shouldContain "@Mutation\nrpc DeleteBook {\n  bookId: String\n} -> Unit"
+        ws shouldContain "@Subscription\nrpc BookAdded {\n  genre: Genre?\n} -> Book"
+        ws shouldContain "@Query\nrpc SearchBooks {\n  titleContains: String?,\n  @Default(20) limit: Integer32\n} -> Book[]"
         ws.split("rpc ").size - 1 shouldBe 9
         ws shouldNotContain "endpoint "
 
         // Types reached from arguments and results live with the controller.
         ws shouldContain "type Book {"
-        ws shouldContain "type BookInput {"
+        // GraphQL input types state their Kotlin constructor defaults.
+        ws shouldContain """
+            |type BookInput {
+            |  title: String,
+            |  @Default(FICTION) genre: Genre,
+            |  authorName: String?,
+            |  @Default(100) pages: Integer32,
+            |  @Default(4.5) rating: Number,
+            |  @Default(true) inPrint: Boolean,
+            |  @Default("hardcover") format: String,
+            |  series: SeriesInput?,
+            |  tags: String[]
+            |}
+        """.trimMargin()
+        ws shouldContain "@Default(1) position: Integer32"
+        // An output type's constructor default is not stated.
+        ws shouldContain "edition: Integer32"
+        ws shouldNotContain "@Default(1) edition"
         ws shouldContain "enum Genre {"
         // Neither the @Arguments object nor a field resolver's result is emitted.
         ws shouldNotContain "BookFilter"
         ws shouldNotContain "Author"
 
         files.single { it.name == "LibraryAdminController.ws" }.readText() shouldContain
-            "rpc ResetLibrary {} -> Boolean"
+            "@Mutation\nrpc ResetLibrary {} -> Boolean"
+
+        // The annotated output parses back with Wirespec 0.21.
+        val ctx = object : ParseContext {
+            override val logger = noLogger
+        }
+        ctx.parse(nonEmptyListOf(ModuleContent(FileUri("BookController.ws"), ws))).isRight() shouldBe true
     }
 
     @Test
     fun `a controller with both REST endpoints and GraphQL operations gets both in one file`(@TempDir tmp: Path) {
         val ws = extract(tmp).single { it.name == "MixedLibraryController.ws" }.readText()
         ws shouldContain "endpoint RestCount GET /books/count"
-        ws shouldContain "rpc ShelfCount {} -> Integer32"
+        ws shouldContain "@Query\nrpc ShelfCount {} -> Integer32"
     }
 
     @Test

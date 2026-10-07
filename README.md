@@ -718,7 +718,8 @@ class UserClient(private val client: HttpClient) {
 Spring for GraphQL annotated controllers are extracted as Wirespec **RPC
 functions** — not as HTTP endpoints, since every GraphQL operation shares one
 `POST /graphql` route. Each query, mutation, and subscription becomes one `rpc`
-whose fields are the operation's arguments and whose result is its return type:
+whose fields are the operation's arguments and whose result is its return type,
+annotated with its operation type:
 
 ```kotlin
 @Controller
@@ -738,14 +739,17 @@ class BookController {
 ```
 
 ```wirespec
+@Query
 rpc BookById {
   id: String
 } -> Book?
 
+@Mutation
 rpc AddBook {
   input: BookInput
 } -> Book
 
+@Subscription
 rpc BookAdded {} -> Book
 ```
 
@@ -754,6 +758,8 @@ rpc BookAdded {} -> Book
   or as a class-level default) is `Query`, `Mutation`, or `Subscription`.
   Mappings on any other type are field resolvers and are skipped, as are
   `@BatchMapping` methods.
+- **Operation type** is stated as a `@Query`, `@Mutation`, or `@Subscription`
+  annotation on the `rpc`.
 - **Names** are the GraphQL field name (the annotation's `name` / `field`, else
   the method name), PascalCased: `bookById` → `BookById`.
 - **Arguments** come from `@Argument` parameters (name from the annotation, else
@@ -767,6 +773,29 @@ rpc BookAdded {} -> Book
   function's continuation. A `Flux` / `Publisher` / `Flow` is a list for a query
   or mutation; for a subscription it is the event stream, so the result is a
   single event. A handler returning nothing results in `Unit`.
+- **Defaults** of GraphQL input objects are stated as `@Default(value)` field
+  annotations. Spring binds an input object through its constructor, so a property
+  the client leaves out takes its Kotlin constructor default; the extractor reads
+  those defaults from the compiled class and states them on every type an argument
+  reaches, and on the fields of an `@Arguments` object:
+
+  ```kotlin
+  data class BookInput(val title: String, val genre: Genre = Genre.FICTION, val pages: Int = 100)
+  ```
+
+  ```wirespec
+  type BookInput {
+    title: String,
+    @Default(FICTION) genre: Genre,
+    @Default(100) pages: Integer32
+  }
+  ```
+
+  Only literal defaults are stated — numbers, booleans, strings, and enum entries.
+  A computed default (`= listOf()`, `= Instant.now()`) and `= null` are left out,
+  as are defaults on types that are only ever returned. Default values of handler
+  parameters (`@Argument limit: Int = 10`) are not stated: Spring for GraphQL
+  does not apply them.
 - **Nullability** follows the same rules as the rest of the extractor: arguments
   default to non-null (unless Kotlin-nullable, `@Nullable`, `Optional`, or
   `ArgumentValue`), results default to nullable — GraphQL's own default — unless
@@ -785,8 +814,8 @@ cleanly no-ops on projects that don't use it. Toggle it with `extractGraphQl`
   handler signatures. Fields that only exist through a `@SchemaMapping` /
   `@BatchMapping` field resolver are missing from the emitted types, and DTO
   properties not exposed in the schema are still emitted.
-- Wirespec's `rpc` carries no operation kind, so queries, mutations, and
-  subscriptions are emitted alike.
+- Operation types and defaults are carried as annotations, which Wirespec parses
+  but does not interpret itself; use an IR extension to act on them.
 - Root types renamed in the schema (`schema { query: MyQuery }`) are not
   recognised; only `Query`, `Mutation`, and `Subscription`.
 - Netflix DGS (`@DgsQuery`, `@DgsMutation`, …) is not supported.

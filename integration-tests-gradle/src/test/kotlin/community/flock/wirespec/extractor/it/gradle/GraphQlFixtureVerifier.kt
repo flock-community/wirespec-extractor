@@ -8,8 +8,10 @@ import java.io.File
 
 /**
  * Verifier for the `graphql-app` fixture (Gradle: reads `build/wirespec`). Asserts that Spring for GraphQL
- * queries, mutations, and subscriptions become `rpc` definitions in the
- * controller's .ws file, and that field resolvers on non-root types do not.
+ * queries, mutations, and subscriptions become `rpc` definitions — annotated with
+ * their operation type — in the controller's .ws file, that input types state
+ * their Kotlin constructor defaults, and that field resolvers on non-root types
+ * are not extracted.
  */
 object GraphQlFixtureVerifier {
 
@@ -19,12 +21,13 @@ object GraphQlFixtureVerifier {
         wsDir.listFiles()!!.map { it.name }.sorted() shouldContainExactly listOf("BookController.ws")
 
         val ws = File(wsDir, "BookController.ws").readText()
-        ws shouldContain "rpc BookById {\n  id: String\n} -> Book?"
-        ws shouldContain "rpc Books {\n  genre: Genre?\n} -> Book[]"
-        ws shouldContain "rpc AddBook {\n  input: BookInput\n} -> Book"
-        ws shouldContain "rpc BookAdded {} -> Book"
+        ws shouldContain "@Query\nrpc BookById {\n  id: String\n} -> Book?"
+        ws shouldContain "@Query\nrpc Books {\n  genre: Genre?\n} -> Book[]"
+        ws shouldContain "@Mutation\nrpc AddBook {\n  input: BookInput\n} -> Book"
+        ws shouldContain "@Subscription\nrpc BookAdded {} -> Book"
         ws shouldContain "type Book {"
-        ws shouldContain "type BookInput {"
+        // Kotlin constructor defaults of a GraphQL input type are stated as annotations.
+        ws shouldContain "type BookInput {\n  title: String,\n  @Default(FICTION) genre: Genre,\n  @Default(100) pages: Integer32\n}"
         ws shouldContain "enum Genre {"
         ws shouldNotContain "Author"
         ws shouldNotContain "endpoint "

@@ -29,35 +29,29 @@ internal class GraphQlRpcExtractor(
     private val onWarn: (String) -> Unit = {},
 ) {
 
-    private enum class Operation(val typeName: String) {
-        QUERY("Query"),
-        MUTATION("Mutation"),
-        SUBSCRIPTION("Subscription"),
-        ;
-
-        companion object {
-            fun of(typeName: String): Operation? = entries.firstOrNull { it.typeName == typeName }
-        }
-    }
-
     fun extract(controller: Class<*>): List<Rpc> {
         val classTypeName = attributes(controller, GraphQlScanner.SCHEMA_MAPPING)?.getString("typeName").orEmpty()
         // Sorted so the emitted order doesn't depend on the JVM's reflection order.
-        return controller.declaredMethods
+        val rpcs = controller.declaredMethods
             .filterNot { it.isSynthetic || it.isBridge }
             .sortedWith(compareBy({ it.name }, { it.parameterCount }))
             .mapNotNull { extractFromMethod(controller, classTypeName, it) }
+        // Input objects are bound through their constructor, so a missing property takes
+        // its Kotlin default: state those defaults on every type an argument reaches.
+        types.applyConstructorDefaults(rpcs.flatMap { rpc -> rpc.arguments.map { it.type } })
+        return rpcs
     }
 
     private fun extractFromMethod(controller: Class<*>, classTypeName: String, method: Method): Rpc? {
         val mapping = attributes(method, GraphQlScanner.SCHEMA_MAPPING) ?: return null
-        val operation = Operation.of(mapping.getString("typeName").ifEmpty { classTypeName }) ?: return null
+        val kind = Rpc.Kind.of(mapping.getString("typeName").ifEmpty { classTypeName }) ?: return null
         val field = mapping.getString("field").ifEmpty { KotlinNames.demangle(method.name) }
         return Rpc(
             ownerSimpleName = controller.simpleName,
             name = pascalCase(field),
+            kind = kind,
             arguments = method.parameters.indices.flatMap { argumentFields(method, it) },
-            result = result(method, operation),
+            result = result(method, kind),
         )
     }
 
@@ -90,7 +84,7 @@ internal class GraphQlRpcExtractor(
                 onWarn("graphql: skipping @Arguments '${p.name}' on $where: not an object type")
                 return emptyList()
             }
-            return types.fieldsOf(cls)
+            return types.withConstructorDefaults(cls, types.fieldsOf(cls))
         }
         return emptyList()
     }
@@ -100,10 +94,10 @@ internal class GraphQlRpcExtractor(
      * unwrapped; a stream (`Flux`, `Publisher`, `Flow`) is a list for a query or mutation
      * but the event stream itself for a subscription, whose result is one event.
      */
-    private fun result(method: Method, operation: Operation): WireType? {
+    private fun result(method: Method, kind: Rpc.Kind): WireType? {
         var current = ReturnTypeUnwrapper.effectiveReturnType(method)
         var isList = false
-        var streamPending = operation == Operation.SUBSCRIPTION
+        var streamPending = kind == Rpc.Kind.SUBSCRIPTION
         while (current is ParameterizedType) {
             val rawName = (current.rawType as? Class<*>)?.name ?: break
             when (rawName) {

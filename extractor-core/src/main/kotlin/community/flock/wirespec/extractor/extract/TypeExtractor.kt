@@ -1,6 +1,7 @@
 package community.flock.wirespec.extractor.extract
 
 import community.flock.wirespec.extractor.WirespecExtractorException
+import community.flock.wirespec.extractor.model.DefaultValue
 import community.flock.wirespec.extractor.model.WireType
 import java.lang.reflect.ParameterizedType
 import java.lang.reflect.Type
@@ -41,6 +42,9 @@ open class TypeExtractor {
 
     val definitions: Set<WireType> get() = _definitions
 
+    /** The class each object definition was walked from, by definition name. */
+    private val objectClasses = mutableMapOf<String, Class<*>>()
+
     /**
      * Extract a [WireType] for [type], stamping the top-level reference with [nullable].
      * Top-level Object/Enum/Refined definitions accumulate in [definitions].
@@ -55,6 +59,76 @@ open class TypeExtractor {
      * fields reference are registered as usual.
      */
     fun fieldsOf(cls: Class<*>): List<WireType.Field> = walkFields(cls)
+
+    /**
+     * [fields] of [cls] with the literal Kotlin constructor defaults of [cls] attached —
+     * each default checked against its field's type and dropped when it doesn't fit.
+     */
+    fun withConstructorDefaults(cls: Class<*>, fields: List<WireType.Field>): List<WireType.Field> {
+        val defaults = KotlinDefaults.of(cls)
+        if (defaults.isEmpty()) return fields
+        val byWireName = defaults.mapKeys { (property, _) ->
+            val element = cls.declaredFieldOrNull(property) ?: cls.accessorFor(property)
+            element?.let { JacksonNames.effectiveName(it, original = property) } ?: property
+        }
+        return fields.map { f -> f.copy(default = byWireName[f.name]?.let { coerce(it, f.type) }) }
+    }
+
+    /**
+     * Attach Kotlin constructor defaults to every object definition reachable from [roots]
+     * — the types of GraphQL arguments, whose input objects Spring binds through their
+     * constructor, so a missing property takes its default.
+     */
+    fun applyConstructorDefaults(roots: Collection<WireType>) {
+        val byName = _definitions.associateBy { definitionName(it) }
+        val reached = linkedSetOf<String>()
+        val frontier = ArrayDeque(roots.flatMap { refNames(it) })
+        while (frontier.isNotEmpty()) {
+            val name = frontier.removeFirst()
+            if (!reached.add(name)) continue
+            (byName[name] as? WireType.Object)?.fields?.forEach { f -> frontier += refNames(f.type) }
+        }
+        val replaced = _definitions.map { def ->
+            val cls = (def as? WireType.Object)?.takeIf { it.name in reached }?.let { objectClasses[it.name] }
+            if (def is WireType.Object && cls != null) def.copy(fields = withConstructorDefaults(cls, def.fields)) else def
+        }
+        _definitions.clear()
+        _definitions += replaced
+    }
+
+    /** [default] as it applies to a field of [type], or null when the field can't take it. */
+    private fun coerce(default: DefaultValue, type: WireType): DefaultValue? = when (type) {
+        is WireType.Primitive -> when (type.kind) {
+            WireType.Primitive.Kind.STRING -> default.takeIf { it is DefaultValue.StringValue }
+            WireType.Primitive.Kind.BOOLEAN -> default.takeIf { it is DefaultValue.BooleanValue }
+            WireType.Primitive.Kind.INTEGER_32, WireType.Primitive.Kind.INTEGER_64 ->
+                default.takeIf { it is DefaultValue.IntegerValue }
+            WireType.Primitive.Kind.NUMBER_32, WireType.Primitive.Kind.NUMBER_64 -> when (default) {
+                is DefaultValue.IntegerValue -> DefaultValue.NumberValue(default.value.toDouble())
+                is DefaultValue.NumberValue -> default
+                else -> null
+            }
+            WireType.Primitive.Kind.BYTES -> null
+        }
+        is WireType.Ref -> (default as? DefaultValue.EnumValue)?.takeIf { entry ->
+            _definitions.any { it is WireType.EnumDef && it.name == type.name && entry.value in it.values }
+        }
+        else -> null
+    }
+
+    private fun refNames(type: WireType): List<String> = when (type) {
+        is WireType.Ref    -> listOf(type.name)
+        is WireType.ListOf -> refNames(type.element)
+        is WireType.MapOf  -> refNames(type.value)
+        else               -> emptyList()
+    }
+
+    private fun definitionName(def: WireType): String? = when (def) {
+        is WireType.Object  -> def.name
+        is WireType.EnumDef -> def.name
+        is WireType.Refined -> def.name
+        else                -> null
+    }
 
     private fun extractInner(type: Type, nullable: Boolean): WireType = when (type) {
         is Class<*>          -> fromClass(type, nullable)
@@ -165,6 +239,7 @@ open class TypeExtractor {
         cache[fp] = ref.copy(nullable = false)
         val fields = walkFields(cls)
         _definitions += WireType.Object(name, fields)
+        objectClasses[name] = cls
         return ref
     }
 

@@ -1,6 +1,7 @@
 // src/main/kotlin/community/flock/wirespec/extractor/ast/WirespecAstBuilder.kt
 package community.flock.wirespec.extractor.ast
 
+import community.flock.wirespec.compiler.core.parse.ast.Annotation
 import community.flock.wirespec.compiler.core.parse.ast.Channel as WsChannel
 import community.flock.wirespec.compiler.core.parse.ast.Comment
 import community.flock.wirespec.compiler.core.parse.ast.Definition
@@ -14,6 +15,7 @@ import community.flock.wirespec.compiler.core.parse.ast.Refined as WsRefined
 import community.flock.wirespec.compiler.core.parse.ast.Rpc as WsRpc
 import community.flock.wirespec.compiler.core.parse.ast.Type as WsType
 import community.flock.wirespec.extractor.model.Channel
+import community.flock.wirespec.extractor.model.DefaultValue
 import community.flock.wirespec.extractor.model.Endpoint
 import community.flock.wirespec.extractor.model.Endpoint.HttpMethod
 import community.flock.wirespec.extractor.model.Endpoint.PathSegment
@@ -53,9 +55,10 @@ class WirespecAstBuilder {
         reference = toReference(c.payload),
     )
 
+    /** An RPC, annotated with its GraphQL operation type: `@Query`, `@Mutation`, or `@Subscription`. */
     fun toRpc(r: Rpc): WsRpc = WsRpc(
         comment = null,
-        annotations = emptyList(),
+        annotations = listOf(Annotation(r.kind.typeName, emptyList())),
         identifier = DefinitionIdentifier(r.name),
         shape = WsType.Shape(value = r.arguments.map { it.toField() }),
         result = r.result?.let(::toReference) ?: Reference.Unit(false),
@@ -167,11 +170,19 @@ class WirespecAstBuilder {
         is PathSegment.Variable -> WsEndpoint.Segment.Param(FieldIdentifier(name), toReference(type))
     }
 
+    /** A field; a default value is stated as `@Default(value)`. */
     private fun WireType.Field.toField(): WsField = WsField(
-        annotations = emptyList(),
+        annotations = listOfNotNull(
+            default?.takeIf { it.fitsAnnotation() }
+                ?.let { Annotation(DEFAULT, listOf(Annotation.Parameter("default", Annotation.Value.Single(it.literal)))) },
+        ),
         identifier = FieldIdentifier(name),
         reference = toReference(type),
     )
+
+    /** Wirespec string literals have no escapes, so a string holding a quote or line break can't be stated. */
+    private fun DefaultValue.fitsAnnotation(): Boolean =
+        this !is DefaultValue.StringValue || value.none { it == '"' || it == '\\' || it == '\n' || it == '\r' }
 
     private fun Param.toField(): WsField = WsField(
         annotations = emptyList(),
@@ -188,5 +199,10 @@ class WirespecAstBuilder {
         HttpMethod.OPTIONS -> WsEndpoint.Method.OPTIONS
         HttpMethod.HEAD    -> WsEndpoint.Method.HEAD
         HttpMethod.TRACE   -> WsEndpoint.Method.TRACE
+    }
+
+    companion object {
+        /** Name of the annotation stating a field's default value. */
+        const val DEFAULT = "Default"
     }
 }
