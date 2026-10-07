@@ -15,7 +15,6 @@ import community.flock.wirespec.compiler.core.parse.ast.Refined as WsRefined
 import community.flock.wirespec.compiler.core.parse.ast.Rpc as WsRpc
 import community.flock.wirespec.compiler.core.parse.ast.Type as WsType
 import community.flock.wirespec.extractor.model.Channel
-import community.flock.wirespec.extractor.model.DefaultValue
 import community.flock.wirespec.extractor.model.Endpoint
 import community.flock.wirespec.extractor.model.Endpoint.HttpMethod
 import community.flock.wirespec.extractor.model.Endpoint.PathSegment
@@ -55,10 +54,18 @@ class WirespecAstBuilder {
         reference = toReference(c.payload),
     )
 
-    /** An RPC, annotated with its GraphQL operation type: `@Query`, `@Mutation`, or `@Subscription`. */
+    /**
+     * An RPC, annotated the way Wirespec's GraphQL converter (wirespec PR #710) does: with its
+     * operation type — `@GraphQLQuery`, `@GraphQLMutation`, or `@GraphQLSubscription` — and with
+     * `@GraphQLName` when the field name can't be read back from the RPC name.
+     */
     fun toRpc(r: Rpc): WsRpc = WsRpc(
         comment = null,
-        annotations = listOf(Annotation(r.kind.typeName, emptyList())),
+        annotations = listOfNotNull(
+            Annotation("GraphQL${r.kind.typeName}", emptyList()),
+            Annotation("GraphQLName", listOf(Annotation.Parameter("default", Annotation.Value.Single(r.field))))
+                .takeIf { r.name.replaceFirstChar(Char::lowercase) != r.field },
+        ),
         identifier = DefinitionIdentifier(r.name),
         shape = WsType.Shape(value = r.arguments.map { it.toField() }),
         result = r.result?.let(::toReference) ?: Reference.Unit(false),
@@ -170,19 +177,11 @@ class WirespecAstBuilder {
         is PathSegment.Variable -> WsEndpoint.Segment.Param(FieldIdentifier(name), toReference(type))
     }
 
-    /** A field; a default value is stated as `@Default(value)`. */
     private fun WireType.Field.toField(): WsField = WsField(
-        annotations = listOfNotNull(
-            default?.takeIf { it.fitsAnnotation() }
-                ?.let { Annotation(DEFAULT, listOf(Annotation.Parameter("default", Annotation.Value.Single(it.literal)))) },
-        ),
+        annotations = emptyList(),
         identifier = FieldIdentifier(name),
         reference = toReference(type),
     )
-
-    /** Wirespec string literals have no escapes, so a string holding a quote or line break can't be stated. */
-    private fun DefaultValue.fitsAnnotation(): Boolean =
-        this !is DefaultValue.StringValue || value.none { it == '"' || it == '\\' || it == '\n' || it == '\r' }
 
     private fun Param.toField(): WsField = WsField(
         annotations = emptyList(),
@@ -199,10 +198,5 @@ class WirespecAstBuilder {
         HttpMethod.OPTIONS -> WsEndpoint.Method.OPTIONS
         HttpMethod.HEAD    -> WsEndpoint.Method.HEAD
         HttpMethod.TRACE   -> WsEndpoint.Method.TRACE
-    }
-
-    companion object {
-        /** Name of the annotation stating a field's default value. */
-        const val DEFAULT = "Default"
     }
 }

@@ -32,23 +32,18 @@ internal class GraphQlRpcExtractor(
     fun extract(controller: Class<*>): List<Rpc> {
         val classTypeName = attributes(controller, GraphQlScanner.SCHEMA_MAPPING)?.getString("typeName").orEmpty()
         // Sorted so the emitted order doesn't depend on the JVM's reflection order.
-        val rpcs = controller.declaredMethods
+        return controller.declaredMethods
             .filterNot { it.isSynthetic || it.isBridge }
             .sortedWith(compareBy({ it.name }, { it.parameterCount }))
             .mapNotNull { extractFromMethod(controller, classTypeName, it) }
-        // Input objects are bound through their constructor, so a missing property takes
-        // its Kotlin default: state those defaults on every type an argument reaches.
-        types.applyConstructorDefaults(rpcs.flatMap { rpc -> rpc.arguments.map { it.type } })
-        return rpcs
     }
 
     private fun extractFromMethod(controller: Class<*>, classTypeName: String, method: Method): Rpc? {
         val mapping = attributes(method, GraphQlScanner.SCHEMA_MAPPING) ?: return null
         val kind = Rpc.Kind.of(mapping.getString("typeName").ifEmpty { classTypeName }) ?: return null
-        val field = mapping.getString("field").ifEmpty { KotlinNames.demangle(method.name) }
         return Rpc(
             ownerSimpleName = controller.simpleName,
-            name = pascalCase(field),
+            field = mapping.getString("field").ifEmpty { KotlinNames.demangle(method.name) },
             kind = kind,
             arguments = method.parameters.indices.flatMap { argumentFields(method, it) },
             result = result(method, kind),
@@ -84,7 +79,7 @@ internal class GraphQlRpcExtractor(
                 onWarn("graphql: skipping @Arguments '${p.name}' on $where: not an object type")
                 return emptyList()
             }
-            return types.withConstructorDefaults(cls, types.fieldsOf(cls))
+            return types.fieldsOf(cls)
         }
         return emptyList()
     }
@@ -125,9 +120,6 @@ internal class GraphQlRpcExtractor(
 
     private fun isVoid(type: Type): Boolean =
         type == Void.TYPE || type == Void::class.java || type.typeName == "kotlin.Unit"
-
-    private fun pascalCase(name: String): String =
-        if (name.isEmpty()) name else name[0].uppercaseChar() + name.substring(1)
 
     private companion object {
         const val ARGUMENT = "${GraphQlScanner.PACKAGE}.Argument"

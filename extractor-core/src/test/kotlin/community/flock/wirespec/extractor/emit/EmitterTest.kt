@@ -9,10 +9,7 @@ import community.flock.wirespec.compiler.core.parse
 import community.flock.wirespec.compiler.utils.noLogger
 import community.flock.wirespec.extractor.ast.WirespecAstBuilder
 import community.flock.wirespec.extractor.extract.TypeExtractor
-import community.flock.wirespec.compiler.core.parse.ast.Annotation as WsAnnotation
-import community.flock.wirespec.compiler.core.parse.ast.Type as WsType
 import community.flock.wirespec.extractor.model.Channel
-import community.flock.wirespec.extractor.model.DefaultValue
 import community.flock.wirespec.extractor.model.Endpoint
 import community.flock.wirespec.extractor.model.Endpoint.HttpMethod
 import community.flock.wirespec.extractor.model.Endpoint.PathSegment
@@ -619,7 +616,7 @@ class EmitterTest {
     fun `rpc definitions render with arguments and result and parse back`(@TempDir dir: Path) {
         val withArgs = builder.toRpc(Rpc(
             ownerSimpleName = "BookController",
-            name = "BookById",
+            field = "bookById",
             kind = Rpc.Kind.QUERY,
             arguments = listOf(
                 WireType.Field("id", WireType.Primitive(WireType.Primitive.Kind.STRING)),
@@ -627,8 +624,10 @@ class EmitterTest {
             ),
             result = WireType.Ref("Book", nullable = true),
         ))
-        val noArgs = builder.toRpc(Rpc("BookController", "AllBooks", Rpc.Kind.SUBSCRIPTION, emptyList(), WireType.ListOf(WireType.Ref("Book"))))
-        val noResult = builder.toRpc(Rpc("BookController", "Reset", Rpc.Kind.MUTATION, emptyList(), null))
+        val noArgs = builder.toRpc(Rpc("BookController", "allBooks", Rpc.Kind.SUBSCRIPTION, emptyList(), WireType.ListOf(WireType.Ref("Book"))))
+        val noResult = builder.toRpc(Rpc("BookController", "reset", Rpc.Kind.MUTATION, emptyList(), null))
+        // Renamed for a clash: @GraphQLName keeps the field name.
+        val renamed = builder.toRpc(Rpc("BookController", "book", Rpc.Kind.QUERY, emptyList(), WireType.Ref("Book"), name = "QueryBook"))
         val book = builder.toDefinition(WireType.Object(
             name = "Book",
             fields = listOf(WireType.Field("title", WireType.Primitive(WireType.Primitive.Kind.STRING))),
@@ -636,14 +635,15 @@ class EmitterTest {
 
         emitter.write(
             outputDir = dir.toFile(),
-            controllerDefinitions = mapOf("BookController" to listOf(withArgs, noArgs, noResult, book)),
+            controllerDefinitions = mapOf("BookController" to listOf(withArgs, noArgs, noResult, renamed, book)),
             sharedTypes = emptyList(),
         )
         val out = File(dir.toFile(), "BookController.ws").readText()
 
-        out shouldContain "@Query\nrpc BookById {\n  id: String,\n  `_version`: Integer32?\n} -> Book?"
-        out shouldContain "@Subscription\nrpc AllBooks {} -> Book[]"
-        out shouldContain "@Mutation\nrpc Reset {} -> Unit"
+        out shouldContain "@GraphQLQuery\nrpc BookById {\n  id: String,\n  `_version`: Integer32?\n} -> Book?"
+        out shouldContain "@GraphQLSubscription\nrpc AllBooks {} -> Book[]"
+        out shouldContain "@GraphQLMutation\nrpc Reset {} -> Unit"
+        out shouldContain "@GraphQLQuery\n@GraphQLName(\"book\")\nrpc QueryBook {} -> Book"
 
         val ctx = object : ParseContext {
             override val logger = noLogger
@@ -664,7 +664,7 @@ class EmitterTest {
         ))
         val rpc = builder.toRpc(Rpc(
             ownerSimpleName = "BookController",
-            name = "Books",
+            field = "books",
             kind = Rpc.Kind.QUERY,
             arguments = listOf(WireType.Field("filter", WireType.Ref("Filter"))),
             result = WireType.Ref("Filter"),
@@ -681,61 +681,6 @@ class EmitterTest {
         out shouldContain "endpoint Books1 "
         out shouldContain "rpc Books2 {\n  filter: Unit\n} -> Unit"
         out shouldNotContain "type Filter"
-    }
-
-    @Test
-    fun `field defaults render as Default annotations that parse back to the same values`(@TempDir dir: Path) {
-        fun field(name: String, kind: WireType.Primitive.Kind, default: DefaultValue) =
-            WireType.Field(name, WireType.Primitive(kind), default = default)
-        val input = builder.toDefinition(WireType.Object(
-            name = "PageInput",
-            fields = listOf(
-                field("size", WireType.Primitive.Kind.INTEGER_32, DefaultValue.IntegerValue(20)),
-                field("offset", WireType.Primitive.Kind.INTEGER_64, DefaultValue.IntegerValue(-7)),
-                field("ratio", WireType.Primitive.Kind.NUMBER_64, DefaultValue.NumberValue(0.5)),
-                field("strict", WireType.Primitive.Kind.BOOLEAN, DefaultValue.BooleanValue(false)),
-                field("query", WireType.Primitive.Kind.STRING, DefaultValue.StringValue("two words")),
-                field("token", WireType.Primitive.Kind.STRING, DefaultValue.StringValue("abc")),
-                // A quote can't be written in a Wirespec string literal: the default is left out.
-                field("quote", WireType.Primitive.Kind.STRING, DefaultValue.StringValue("say \"hi\"")),
-                WireType.Field("sort", WireType.Ref("Order"), default = DefaultValue.EnumValue("DESC")),
-            ),
-        ))
-        val order = builder.toDefinition(WireType.EnumDef("Order", listOf("ASC", "DESC")))
-
-        emitter.write(
-            outputDir = dir.toFile(),
-            controllerDefinitions = mapOf("Pages" to listOf(input, order)),
-            sharedTypes = emptyList(),
-        )
-        val out = File(dir.toFile(), "Pages.ws").readText()
-
-        out shouldContain "@Default(20) size: Integer32,"
-        out shouldContain "@Default(\"-7\") offset: Integer,"
-        out shouldContain "@Default(0.5) ratio: Number,"
-        out shouldContain "@Default(false) strict: Boolean,"
-        out shouldContain "@Default(\"two words\") query: String,"
-        out shouldContain "@Default(\"abc\") token: String,"
-        out shouldContain "  quote: String,"
-        out shouldContain "@Default(DESC) sort: Order"
-
-        val ctx = object : ParseContext {
-            override val logger = noLogger
-        }
-        val parsed = ctx.parse(nonEmptyListOf(ModuleContent(FileUri("Pages.ws"), out))).getOrNull()!!
-        val defaults = parsed.modules.head.statements.filterIsInstance<WsType>().single().shape.value.associate { f ->
-            f.identifier.value to f.annotations.singleOrNull()?.parameters?.single()?.value
-        }
-        defaults shouldBe mapOf(
-            "size" to WsAnnotation.Value.Single("20"),
-            "offset" to WsAnnotation.Value.Single("-7"),
-            "ratio" to WsAnnotation.Value.Single("0.5"),
-            "strict" to WsAnnotation.Value.Single("false"),
-            "query" to WsAnnotation.Value.Single("two words"),
-            "token" to WsAnnotation.Value.Single("abc"),
-            "quote" to null,
-            "sort" to WsAnnotation.Value.Single("DESC"),
-        )
     }
 
     @Suppress("unused")

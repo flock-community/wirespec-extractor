@@ -6,4 +6,4 @@ data class Author(val name: String)
 
 data class Book(val id: String, val title: String, val genre: Genre)
 
-data class BookInput(val title: String, val genre: Genre = Genre.FICTION, val pages: Int = 100)
+data class BookInput(val title: String, val genre: Genre)

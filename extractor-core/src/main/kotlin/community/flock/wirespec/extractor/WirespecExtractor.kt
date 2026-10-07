@@ -10,6 +10,7 @@ import community.flock.wirespec.extractor.extract.dsl.DslBytecodeWalker
 import community.flock.wirespec.extractor.extract.dsl.DslEndpointExtractor
 import community.flock.wirespec.extractor.extract.dsl.DslRouteScanner
 import community.flock.wirespec.extractor.extract.graphql.GraphQlRpcExtractor
+import community.flock.wirespec.extractor.extract.graphql.GraphQlRpcNaming
 import community.flock.wirespec.extractor.extract.graphql.GraphQlScanner
 import community.flock.wirespec.extractor.extract.jaxrs.JaxRsEndpointExtractor
 import community.flock.wirespec.extractor.extract.ktor.KtorClientExtractor
@@ -217,18 +218,15 @@ object WirespecExtractor {
             }
 
             // -- GraphQL operations (Spring for GraphQL @QueryMapping/@MutationMapping/…) ----
-            for (controller in graphQlControllers) {
-                val rpcs = try {
-                    graphQlRpcs.extract(controller).map(builder::toRpc)
+            // Extracted here, named and added once every type is known (see below).
+            val extractedRpcs = graphQlControllers.flatMap { controller ->
+                try {
+                    graphQlRpcs.extract(controller)
                 } catch (e: WirespecExtractorException) {
                     throw e
                 } catch (t: Throwable) {
                     config.log.warn("Skipping GraphQL ${controller.name}: ${t.message}")
                     emptyList()
-                }
-                if (rpcs.isNotEmpty()) {
-                    val key = controller.simpleName
-                    byController[key] = byController[key].orEmpty() + rpcs.map { it as Definition }
                 }
             }
 
@@ -266,8 +264,6 @@ object WirespecExtractor {
                 }
             }
 
-            val byControllerFinal = byController.filterValues { it.isNotEmpty() }
-
             val allTypes = types.definitions.mapNotNull { def ->
                 try {
                     builder.toDefinition(def)
@@ -278,6 +274,16 @@ object WirespecExtractor {
                     null
                 }
             }
+
+            // An RPC is named after its field unless a type (or an earlier RPC) holds that name,
+            // so naming waits until every type has been extracted.
+            val typeNames = allTypes.mapTo(mutableSetOf()) { it.identifier.value }
+            for (rpc in GraphQlRpcNaming.name(extractedRpcs, typeNames)) {
+                val key = rpc.ownerSimpleName
+                byController[key] = byController[key].orEmpty() + (builder.toRpc(rpc) as Definition)
+            }
+
+            val byControllerFinal = byController.filterValues { it.isNotEmpty() }
 
             val partition = TypeOwnership.partition(
                 endpointsByController = byControllerFinal,

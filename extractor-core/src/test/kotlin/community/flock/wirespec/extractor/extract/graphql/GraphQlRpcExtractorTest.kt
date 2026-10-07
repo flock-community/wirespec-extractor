@@ -3,7 +3,6 @@ package community.flock.wirespec.extractor.extract.graphql
 import community.flock.wirespec.extractor.extract.TypeExtractor
 import community.flock.wirespec.extractor.fixtures.graphql.BookController
 import community.flock.wirespec.extractor.fixtures.graphql.LibraryAdminController
-import community.flock.wirespec.extractor.model.DefaultValue
 import community.flock.wirespec.extractor.model.Rpc
 import community.flock.wirespec.extractor.model.WireType
 import community.flock.wirespec.extractor.model.WireType.Primitive.Kind
@@ -25,14 +24,17 @@ class GraphQlRpcExtractorTest {
     @Test
     fun `discovers queries mutations and subscriptions but not field resolvers`() {
         rpcs.keys shouldContainExactlyInAnyOrder listOf(
-            "BookById", "Books", "SearchBooks", "BookCount", "LatestBook",
+            "BookById", "Book", "Books", "SearchBooks", "BookCount", "LatestBook",
             "AddBook", "DeleteBook", "RenameBook",
             "BookAdded",
         )
     }
 
     @Test
-    fun `each rpc knows its GraphQL operation type`() {
+    fun `each rpc knows its GraphQL field and operation type`() {
+        rpc("BookById").field shouldBe "bookById"
+        rpc("BookCount").field shouldBe "bookCount"
+        rpc("SearchBooks").field shouldBe "searchBooks"
         rpc("BookById").kind shouldBe Rpc.Kind.QUERY
         rpc("BookCount").kind shouldBe Rpc.Kind.QUERY
         rpc("AddBook").kind shouldBe Rpc.Kind.MUTATION
@@ -64,36 +66,10 @@ class GraphQlRpcExtractorTest {
     fun `@Arguments object is spread into the argument list without its own definition`() {
         rpc("SearchBooks").arguments shouldContainExactlyInAnyOrder listOf(
             WireType.Field("titleContains", string.copy(nullable = true)),
-            WireType.Field("limit", WireType.Primitive(Kind.INTEGER_32), default = DefaultValue.IntegerValue(20)),
+            WireType.Field("limit", WireType.Primitive(Kind.INTEGER_32)),
         )
         types.definitions.filterIsInstance<WireType.Object>().map { it.name } shouldNotContain "BookFilter"
     }
-
-    @Test
-    fun `input types reached from arguments carry their Kotlin constructor defaults`() {
-        val input = objectNamed("BookInput").fields.associate { it.name to it.default }
-        input shouldBe mapOf(
-            "title" to null,
-            "genre" to DefaultValue.EnumValue("FICTION"),
-            "authorName" to null,
-            "pages" to DefaultValue.IntegerValue(100),
-            "rating" to DefaultValue.NumberValue(4.5),
-            "inPrint" to DefaultValue.BooleanValue(true),
-            "format" to DefaultValue.StringValue("hardcover"),
-            "series" to null,  // `= null`: a nullable field already says it may be absent
-            "tags" to null,    // `= emptyList()`: not a literal
-        )
-        // Nested input objects are inputs too.
-        objectNamed("SeriesInput").fields.single { it.name == "position" }.default shouldBe DefaultValue.IntegerValue(1)
-    }
-
-    @Test
-    fun `output types do not carry constructor defaults`() {
-        objectNamed("Book").fields.mapNotNull { it.default } shouldBe emptyList()
-    }
-
-    private fun objectNamed(name: String): WireType.Object =
-        types.definitions.filterIsInstance<WireType.Object>().single { it.name == name }
 
     @Test
     fun `results follow the declared return type and nullability`() {

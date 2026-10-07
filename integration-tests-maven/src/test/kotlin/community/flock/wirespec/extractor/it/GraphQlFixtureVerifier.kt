@@ -8,10 +8,9 @@ import java.io.File
 
 /**
  * Verifier for the `graphql-app` fixture (Maven: reads `target/wirespec`). Asserts that Spring for GraphQL
- * queries, mutations, and subscriptions become `rpc` definitions — annotated with
- * their operation type — in the controller's .ws file, that input types state
- * their Kotlin constructor defaults, and that field resolvers on non-root types
- * are not extracted.
+ * queries, mutations, and subscriptions become `rpc` definitions in the
+ * controller's .ws file — annotated and named as Wirespec's GraphQL converter
+ * does — and that field resolvers on non-root types do not.
  */
 object GraphQlFixtureVerifier {
 
@@ -21,13 +20,14 @@ object GraphQlFixtureVerifier {
         wsDir.listFiles()!!.map { it.name }.sorted() shouldContainExactly listOf("BookController.ws")
 
         val ws = File(wsDir, "BookController.ws").readText()
-        ws shouldContain "@Query\nrpc BookById {\n  id: String\n} -> Book?"
-        ws shouldContain "@Query\nrpc Books {\n  genre: Genre?\n} -> Book[]"
-        ws shouldContain "@Mutation\nrpc AddBook {\n  input: BookInput\n} -> Book"
-        ws shouldContain "@Subscription\nrpc BookAdded {} -> Book"
+        ws shouldContain "@GraphQLQuery\nrpc BookById {\n  id: String\n} -> Book?"
+        ws shouldContain "@GraphQLQuery\nrpc Books {\n  genre: Genre?\n} -> Book[]"
+        ws shouldContain "@GraphQLMutation\nrpc AddBook {\n  input: BookInput\n} -> Book"
+        ws shouldContain "@GraphQLSubscription\nrpc BookAdded {} -> Book"
+        // `book` is taken by `type Book`: prefixed with the root type, field name kept.
+        ws shouldContain "@GraphQLQuery\n@GraphQLName(\"book\")\nrpc QueryBook {\n  id: String\n} -> Book?"
         ws shouldContain "type Book {"
-        // Kotlin constructor defaults of a GraphQL input type are stated as annotations.
-        ws shouldContain "type BookInput {\n  title: String,\n  @Default(FICTION) genre: Genre,\n  @Default(100) pages: Integer32\n}"
+        ws shouldContain "type BookInput {"
         ws shouldContain "enum Genre {"
         ws shouldNotContain "Author"
         ws shouldNotContain "endpoint "

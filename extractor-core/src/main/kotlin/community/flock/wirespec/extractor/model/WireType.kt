@@ -48,7 +48,5 @@ sealed interface WireType {
         val name: String,
         val type: WireType,
         val description: String? = null,
-        /** The value a missing property is bound to; only set for GraphQL input fields. */
-        val default: DefaultValue? = null,
     )
 }

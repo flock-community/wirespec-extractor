@@ -18,6 +18,10 @@ class BookController {
     @QueryMapping
     fun books(@Argument genre: Genre?): List<Book> = emptyList()
 
+    // Named like `type Book`, so the rpc becomes `QueryBook`.
+    @QueryMapping
+    fun book(@Argument id: String): Book? = null
+
     @MutationMapping
     fun addBook(@Argument input: BookInput): Mono<Book> = Mono.empty()
 

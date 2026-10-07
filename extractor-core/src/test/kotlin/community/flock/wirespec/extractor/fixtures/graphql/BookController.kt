@@ -18,26 +18,11 @@ enum class Genre { FICTION, SCIENCE }
 
 data class Author(val name: String)
 
-/** An output type: its constructor default is not an input default and is not stated. */
-data class Book(val id: String, val title: String, val genre: Genre, val edition: Int = 1)
+data class Book(val id: String, val title: String, val genre: Genre)
 
-/** Kotlin constructor defaults apply when a GraphQL input omits the property. */
-data class BookInput(
-    val title: String,
-    val genre: Genre = Genre.FICTION,
-    val authorName: String?,
-    val pages: Int = 100,
-    val rating: Double = 4.5,
-    val inPrint: Boolean = true,
-    val format: String = "hardcover",
-    val series: SeriesInput? = null,
-    val tags: List<String> = emptyList(),
-)
+data class BookInput(val title: String, val genre: Genre, val authorName: String?)
 
-/** Reached only through [BookInput]: nested inputs carry their defaults too. */
-data class SeriesInput(val name: String, val position: Int = 1)
-
-data class BookFilter(val titleContains: String? = null, val limit: Int = 20)
+data class BookFilter(val titleContains: String?, val limit: Int)
 
 @Suppress("unused", "UNUSED_PARAMETER")
 @Controller
@@ -45,6 +30,10 @@ class BookController {
 
     @QueryMapping
     fun bookById(@Argument id: String): Book? = null
+
+    /** Named like `type Book`: the rpc takes the root type as prefix, `QueryBook`. */
+    @QueryMapping
+    fun book(@Argument id: String): Book? = null
 
     @QueryMapping
     fun books(@Argument genre: Genre?): List<Book> = emptyList()
