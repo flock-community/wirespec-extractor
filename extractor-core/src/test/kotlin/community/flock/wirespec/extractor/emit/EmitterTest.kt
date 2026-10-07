@@ -105,6 +105,19 @@ class EmitterTest {
     }
 
     @Test
+    fun `channel field name is backticked as a reserved keyword`(@TempDir dir: Path) {
+        val typeDef = builder.toDefinition(WireType.Object(
+            name = "NotificationPreference",
+            fields = listOf(
+                WireType.Field("channel", WireType.Primitive(WireType.Primitive.Kind.STRING)),
+            ),
+        ))
+        emitter.write(dir.toFile(), emptyMap(), listOf(typeDef))
+
+        File(dir.toFile(), "types.ws").readText() shouldContain "`channel`: String"
+    }
+
+    @Test
     fun `query and header param names starting with underscore are backticked`(@TempDir dir: Path) {
         val ep = builder.toEndpoint(Endpoint(
             controllerSimpleName = "ParamCtl",

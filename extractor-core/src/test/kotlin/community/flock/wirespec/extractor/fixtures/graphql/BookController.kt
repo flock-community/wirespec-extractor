@@ -89,3 +89,23 @@ class MixedLibraryController {
     @QueryMapping
     fun shelfCount(): Int = 0
 }
+
+@Suppress("unused", "UNUSED_PARAMETER")
+@Controller
+class LibraryNamespaceController {
+
+    @QueryMapping
+    fun library(): Namespace = Namespace
+
+    object Namespace
+}
+
+data class LibraryBook(val title: String)
+
+@Suppress("unused", "UNUSED_PARAMETER")
+@Controller
+class LibraryNamespaceFieldsController {
+
+    @SchemaMapping(typeName = "LibraryQuery")
+    fun catalog(@Argument genre: String?): List<LibraryBook> = emptyList()
+}

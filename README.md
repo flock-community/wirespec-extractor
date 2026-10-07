@@ -757,8 +757,11 @@ rpc BookAdded {} -> Book
 - **Operations** come from `@QueryMapping`, `@MutationMapping`,
   `@SubscriptionMapping`, and `@SchemaMapping` whose `typeName` (on the method,
   or as a class-level default) is `Query`, `Mutation`, or `Subscription`.
-  Mappings on any other type are field resolvers and are skipped, as are
-  `@BatchMapping` methods.
+- **Operation namespaces** whose type names end in `Query`, `Mutation`, or
+  `Subscription` are also emitted as RPCs. For example, fields mapped to
+  `NotificationsQuery` carry `@GraphQLQuery("NotificationsQuery")`.
+- **Object fields** come from other `@SchemaMapping` methods on non-root types.
+  Their `@Argument` parameters are retained as `@GraphQLArgument` metadata.
 - **Operation type** is stated as a `@GraphQLQuery`, `@GraphQLMutation`, or
   `@GraphQLSubscription` annotation on the `rpc`.
 - **Names** are the GraphQL field name (the annotation's `name` / `field`, else
@@ -792,8 +795,7 @@ cleanly no-ops on projects that don't use it. Toggle it with `extractGraphQl`
 **Limitations (v1):**
 
 - The GraphQL schema (`.graphqls`) is not read: the contract is derived from the
-  handler signatures. Fields that only exist through a `@SchemaMapping` /
-  `@BatchMapping` field resolver are missing from the emitted types, and DTO
+  handler signatures. `@BatchMapping` fields are not extracted, and DTO
   properties not exposed in the schema are still emitted.
 - Default values of input object properties are not extracted.
 - Root types renamed in the schema (`schema { query: MyQuery }`) are not

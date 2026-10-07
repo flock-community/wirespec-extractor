@@ -9,6 +9,7 @@ import community.flock.wirespec.compiler.core.parse.ast.Channel
 import community.flock.wirespec.compiler.core.parse.ast.Definition
 import community.flock.wirespec.compiler.core.parse.ast.DefinitionIdentifier
 import community.flock.wirespec.compiler.core.parse.ast.Endpoint
+import community.flock.wirespec.compiler.core.parse.ast.Field
 import community.flock.wirespec.compiler.core.parse.ast.FieldIdentifier
 import community.flock.wirespec.compiler.core.parse.ast.Identifier
 import community.flock.wirespec.compiler.core.parse.ast.Module
@@ -25,16 +26,20 @@ class Emitter {
 
     /**
      * Custom emitter that also backticks field names starting with `_`, and renders
-     * annotations on RPCs.
+     * annotations on RPCs and fields.
      *
      * The upstream [WirespecEmitter] already backticks names that are reserved
      * keywords or start with an uppercase letter, but Wirespec syntax also
      * requires underscore-leading field names to be quoted. It parses annotations
-     * but does not emit them, so an RPC's `@GraphQLQuery` would otherwise be lost.
+     * but does not emit them, so GraphQL operation and argument metadata would
+     * otherwise be lost.
      */
     private val emitter = object : WirespecEmitter() {
         override fun emit(identifier: Identifier): String {
-            if (identifier is FieldIdentifier && identifier.value.startsWith("_")) {
+            if (
+                identifier is FieldIdentifier &&
+                (identifier.value.startsWith("_") || identifier.value == "channel")
+            ) {
                 return "`${identifier.value}`"
             }
             return super.emit(identifier)
@@ -42,6 +47,12 @@ class Emitter {
 
         override fun emit(rpc: Rpc): String =
             rpc.annotations.joinToString("") { "${it.render()}\n" } + super.emit(rpc)
+
+        override fun Field.emit(): String =
+            annotations.joinToString("") { "${it.render()}\n" } + "${emit(identifier)}: ${reference.emit()}"
+
+        override fun Type.Shape.emit(): String =
+            value.joinToString(",\n") { it.emit().prependIndent("  ") }
     }
     private val logger: Logger = noLogger
 

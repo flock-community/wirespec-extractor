@@ -3,6 +3,7 @@ package community.flock.wirespec.extractor.extract.graphql
 import community.flock.wirespec.extractor.extract.TypeExtractor
 import community.flock.wirespec.extractor.fixtures.graphql.BookController
 import community.flock.wirespec.extractor.fixtures.graphql.LibraryAdminController
+import community.flock.wirespec.extractor.fixtures.graphql.LibraryNamespaceFieldsController
 import community.flock.wirespec.extractor.model.Rpc
 import community.flock.wirespec.extractor.model.WireType
 import community.flock.wirespec.extractor.model.WireType.Primitive.Kind
@@ -14,7 +15,9 @@ import org.junit.jupiter.api.Test
 class GraphQlRpcExtractorTest {
 
     private val types = TypeExtractor()
-    private val rpcs = GraphQlRpcExtractor(types).extract(BookController::class.java).associateBy { it.name }
+    private val extractor = GraphQlRpcExtractor(types)
+    private val rpcs = extractor.extract(BookController::class.java).associateBy { it.name }
+    private val fields = extractor.extractFields(BookController::class.java)
 
     private fun rpc(name: String): Rpc = rpcs.getValue(name)
 
@@ -22,12 +25,32 @@ class GraphQlRpcExtractorTest {
     private val book = WireType.Ref("Book")
 
     @Test
-    fun `discovers queries mutations and subscriptions but not field resolvers`() {
+    fun `discovers queries mutations and subscriptions as root operations`() {
         rpcs.keys shouldContainExactlyInAnyOrder listOf(
             "BookById", "Book", "Books", "SearchBooks", "BookCount", "LatestBook",
             "AddBook", "DeleteBook", "RenameBook",
             "BookAdded",
         )
+    }
+
+    @Test
+    fun `discovers non-root schema mappings as GraphQL fields`() {
+        fields.single().let { field ->
+            field.parentTypeName shouldBe "Book"
+            field.field shouldBe "author"
+            field.arguments shouldBe emptyList()
+            field.result shouldBe WireType.Ref("Author")
+        }
+    }
+
+    @Test
+    fun `discovers query namespace schema mappings as custom-root RPCs`() {
+        val rpc = extractor.extract(LibraryNamespaceFieldsController::class.java).single()
+
+        rpc.field shouldBe "catalog"
+        rpc.kind shouldBe Rpc.Kind.QUERY
+        rpc.rootTypeName shouldBe "LibraryQuery"
+        extractor.extractFields(LibraryNamespaceFieldsController::class.java) shouldBe emptyList()
     }
 
     @Test

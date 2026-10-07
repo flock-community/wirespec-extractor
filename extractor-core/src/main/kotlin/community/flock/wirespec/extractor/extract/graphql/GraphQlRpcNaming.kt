@@ -26,7 +26,7 @@ internal object GraphQlRpcNaming {
             val base = if (TYPE_NAME.matches(candidate) && candidate !in RESERVED && candidate !in taken) {
                 candidate
             } else {
-                rpc.kind.typeName + candidate
+                rpc.rootTypeName + candidate
             }
             val name = (sequenceOf(base) + generateSequence(2) { it + 1 }.map { "$base$it" })
                 .first { it !in taken }

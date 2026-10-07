@@ -4,6 +4,7 @@ import community.flock.wirespec.extractor.extract.KotlinNames
 import community.flock.wirespec.extractor.extract.NullabilityResolver
 import community.flock.wirespec.extractor.extract.ReturnTypeUnwrapper
 import community.flock.wirespec.extractor.extract.TypeExtractor
+import community.flock.wirespec.extractor.model.GraphQlField
 import community.flock.wirespec.extractor.model.Rpc
 import community.flock.wirespec.extractor.model.WireType
 import org.springframework.core.annotation.AnnotatedElementUtils
@@ -14,15 +15,15 @@ import java.lang.reflect.ParameterizedType
 import java.lang.reflect.Type
 
 /**
- * Turns a Spring for GraphQL controller into [Rpc] domain values: one per query,
- * mutation, or subscription handler.
+ * Turns a Spring for GraphQL controller into root [Rpc] operations and non-root
+ * [GraphQlField] resolvers.
  *
  * Every mapping annotation is read as its merged `@SchemaMapping` — `@QueryMapping` is
  * `@SchemaMapping(typeName = "Query")` and so on — which keeps composed annotations and
- * the class-level `typeName` default working. Mappings on any other type are field
- * resolvers (`@SchemaMapping(typeName = "Book") fun author(book: Book)`), not operations,
- * and are skipped. Annotations are matched by fully-qualified name, so Spring for GraphQL
- * need not be on the extractor's own classpath.
+ * the class-level `typeName` default working. Mappings on any other type become fields
+ * on that GraphQL object (`@SchemaMapping(typeName = "Book") fun author(book: Book)`).
+ * Annotations are matched by fully-qualified name, so Spring for GraphQL need not be on
+ * the extractor's own classpath.
  */
 internal class GraphQlRpcExtractor(
     private val types: TypeExtractor,
@@ -30,25 +31,53 @@ internal class GraphQlRpcExtractor(
 ) {
 
     fun extract(controller: Class<*>): List<Rpc> {
+        return mappedMethods(controller).mapNotNull { (method, typeName) ->
+            val kind = operationKind(typeName) ?: return@mapNotNull null
+            Rpc(
+                ownerSimpleName = controller.simpleName,
+                field = fieldName(method),
+                kind = kind,
+                rootTypeName = typeName,
+                arguments = method.parameters.indices.flatMap { argumentFields(method, it) },
+                result = result(method, kind),
+            )
+        }
+    }
+
+    fun extractFields(controller: Class<*>): List<GraphQlField> =
+        mappedMethods(controller).mapNotNull { (method, typeName) ->
+            if (operationKind(typeName) != null) return@mapNotNull null
+            GraphQlField(
+                parentTypeName = typeName,
+                field = fieldName(method),
+                arguments = method.parameters.indices.flatMap { argumentFields(method, it) },
+                result = result(method),
+            )
+        }
+
+    private fun operationKind(typeName: String): Rpc.Kind? =
+        Rpc.Kind.of(typeName)
+            ?: Rpc.Kind.entries.singleOrNull { typeName.endsWith(it.typeName) }
+
+    private fun mappedMethods(controller: Class<*>): List<Pair<Method, String>> {
         val classTypeName = attributes(controller, GraphQlScanner.SCHEMA_MAPPING)?.getString("typeName").orEmpty()
         // Sorted so the emitted order doesn't depend on the JVM's reflection order.
         return controller.declaredMethods
             .filterNot { it.isSynthetic || it.isBridge }
             .sortedWith(compareBy({ it.name }, { it.parameterCount }))
-            .mapNotNull { extractFromMethod(controller, classTypeName, it) }
+            .mapNotNull { method ->
+                val mapping = attributes(method, GraphQlScanner.SCHEMA_MAPPING) ?: return@mapNotNull null
+                mapping.getString("typeName").ifEmpty { classTypeName }
+                    .takeIf(String::isNotEmpty)
+                    ?.let { method to it }
+            }
     }
 
-    private fun extractFromMethod(controller: Class<*>, classTypeName: String, method: Method): Rpc? {
-        val mapping = attributes(method, GraphQlScanner.SCHEMA_MAPPING) ?: return null
-        val kind = Rpc.Kind.of(mapping.getString("typeName").ifEmpty { classTypeName }) ?: return null
-        return Rpc(
-            ownerSimpleName = controller.simpleName,
-            field = mapping.getString("field").ifEmpty { KotlinNames.demangle(method.name) },
-            kind = kind,
-            arguments = method.parameters.indices.flatMap { argumentFields(method, it) },
-            result = result(method, kind),
-        )
-    }
+    private fun fieldName(method: Method): String =
+        attributes(method, GraphQlScanner.SCHEMA_MAPPING)
+            ?.getString("field")
+            ?.ifEmpty { KotlinNames.demangle(method.name) }
+            ?: KotlinNames.demangle(method.name)
 
     /**
      * The RPC fields one handler parameter contributes: one for `@Argument`, the bound
@@ -89,7 +118,7 @@ internal class GraphQlRpcExtractor(
      * unwrapped; a stream (`Flux`, `Publisher`, `Flow`) is a list for a query or mutation
      * but the event stream itself for a subscription, whose result is one event.
      */
-    private fun result(method: Method, kind: Rpc.Kind): WireType? {
+    private fun result(method: Method, kind: Rpc.Kind? = null): WireType? {
         var current = ReturnTypeUnwrapper.effectiveReturnType(method)
         var isList = false
         var streamPending = kind == Rpc.Kind.SUBSCRIPTION

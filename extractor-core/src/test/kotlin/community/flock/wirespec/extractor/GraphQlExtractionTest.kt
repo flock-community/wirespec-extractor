@@ -34,6 +34,7 @@ class GraphQlExtractionTest {
         val files = extract(tmp)
         files.map { it.name } shouldContainExactlyInAnyOrder listOf(
             "BookController.ws", "LibraryAdminController.ws", "MixedLibraryController.ws",
+            "LibraryNamespaceController.ws", "LibraryNamespaceFieldsController.ws",
         )
 
         val ws = files.single { it.name == "BookController.ws" }.readText()
@@ -59,12 +60,28 @@ class GraphQlExtractionTest {
         ws shouldContain "type Book {"
         ws shouldContain "type BookInput {"
         ws shouldContain "enum Genre {"
-        // Neither the @Arguments object nor a field resolver's result is emitted.
+        // The @Arguments object itself is not emitted.
         ws shouldNotContain "BookFilter"
-        ws shouldNotContain "Author"
+        ws shouldContain "author: Author"
+        ws shouldContain "type Author {"
 
         files.single { it.name == "LibraryAdminController.ws" }.readText() shouldContain
             "@GraphQLMutation\nrpc ResetLibrary {} -> Boolean"
+
+        files.single { it.name == "LibraryNamespaceController.ws" }.readText().let { namespace ->
+            namespace shouldContain "@GraphQLQuery\nrpc Library {} -> Unit"
+            namespace shouldNotContain "type LibraryQuery"
+        }
+
+        files.single { it.name == "LibraryNamespaceFieldsController.ws" }.readText().let { namespace ->
+            namespace shouldContain """
+                |@GraphQLQuery("LibraryQuery")
+                |rpc Catalog {
+                |  genre: String?
+                |} -> LibraryBook[]
+            """.trimMargin()
+            namespace shouldNotContain "type LibraryQuery"
+        }
 
         // The annotated output parses back with Wirespec 0.21.
         val ctx = object : ParseContext {

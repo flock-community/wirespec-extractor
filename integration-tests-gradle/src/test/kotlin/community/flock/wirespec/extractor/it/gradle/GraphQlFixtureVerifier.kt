@@ -10,7 +10,7 @@ import java.io.File
  * Verifier for the `graphql-app` fixture (Gradle: reads `build/wirespec`). Asserts that Spring for GraphQL
  * queries, mutations, and subscriptions become `rpc` definitions in the
  * controller's .ws file — annotated and named as Wirespec's GraphQL converter
- * does — and that field resolvers on non-root types do not.
+ * does — and that field resolvers become fields on their non-root types.
  */
 object GraphQlFixtureVerifier {
 
@@ -29,7 +29,8 @@ object GraphQlFixtureVerifier {
         ws shouldContain "type Book {"
         ws shouldContain "type BookInput {"
         ws shouldContain "enum Genre {"
-        ws shouldNotContain "Author"
+        ws shouldContain "author: Author"
+        ws shouldContain "type Author {"
         ws shouldNotContain "endpoint "
     }
 }

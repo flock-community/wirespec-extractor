@@ -1,6 +1,7 @@
 package community.flock.wirespec.extractor
 
 import community.flock.wirespec.compiler.core.parse.ast.Definition
+import community.flock.wirespec.compiler.core.parse.ast.Type as WsType
 import community.flock.wirespec.extractor.ast.WirespecAstBuilder
 import community.flock.wirespec.extractor.classpath.ClasspathBuilder
 import community.flock.wirespec.extractor.emit.Emitter
@@ -229,6 +230,16 @@ object WirespecExtractor {
                     emptyList()
                 }
             }
+            val extractedGraphQlFields = graphQlControllers.flatMap { controller ->
+                try {
+                    graphQlRpcs.extractFields(controller)
+                } catch (e: WirespecExtractorException) {
+                    throw e
+                } catch (t: Throwable) {
+                    config.log.warn("Skipping GraphQL fields from ${controller.name}: ${t.message}")
+                    emptyList()
+                }
+            }
 
             // -- Messaging channels (Kafka, JMS, Rabbit, Pulsar, Spring Integration) ----
             val messagingExtractor = MessagingChannelExtractor(types, onWarn = { msg -> config.log.warn(msg) })
@@ -264,7 +275,7 @@ object WirespecExtractor {
                 }
             }
 
-            val allTypes = types.definitions.mapNotNull { def ->
+            val extractedTypes = types.definitions.mapNotNull { def ->
                 try {
                     builder.toDefinition(def)
                 } catch (e: WirespecExtractorException) {
@@ -274,6 +285,10 @@ object WirespecExtractor {
                     null
                 }
             }
+            val graphQlTypes = extractedGraphQlFields
+                .groupBy { it.parentTypeName }
+                .map { (typeName, fields) -> builder.toGraphQlType(typeName, fields.distinctBy { it.field }) }
+            val allTypes = mergeGraphQlTypes(extractedTypes, graphQlTypes)
 
             // An RPC is named after its field unless a type (or an earlier RPC) holds that name,
             // so naming waits until every type has been extracted.
@@ -317,6 +332,30 @@ internal fun detectControllerCollisions(controllers: List<Class<*>>): Map<String
 
 /** Normalises the raw `basePackage` parameter: blank or null becomes null. */
 internal fun effectiveBasePackage(raw: String?): String? = raw?.takeIf { it.isNotBlank() }
+
+private fun mergeGraphQlTypes(
+    extractedTypes: List<Definition>,
+    graphQlTypes: List<WsType>,
+): List<Definition> {
+    val graphQlByName = graphQlTypes.associateBy { it.identifier.value }
+    val mergedNames = extractedTypes.mapTo(mutableSetOf()) { it.identifier.value }
+    val merged = extractedTypes.map { definition ->
+        val graphQlType = graphQlByName[definition.identifier.value]
+        if (definition !is WsType || graphQlType == null) {
+            definition
+        } else {
+            val fieldsByName = graphQlType.shape.value.associateBy { it.identifier.value }
+            val existingNames = definition.shape.value.mapTo(mutableSetOf()) { it.identifier.value }
+            definition.copy(
+                shape = definition.shape.copy(
+                    value = definition.shape.value.map { fieldsByName[it.identifier.value] ?: it } +
+                        graphQlType.shape.value.filterNot { it.identifier.value in existingNames },
+                ),
+            )
+        }
+    }
+    return merged + graphQlTypes.filterNot { it.identifier.value in mergedNames }
+}
 
 /**
  * Asserts that [output] (or the nearest existing ancestor) is writable.
