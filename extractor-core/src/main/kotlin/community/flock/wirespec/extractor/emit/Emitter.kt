@@ -4,15 +4,18 @@ package community.flock.wirespec.extractor.emit
 import arrow.core.NonEmptyList
 import arrow.core.toNonEmptyListOrNull
 import community.flock.wirespec.compiler.core.FileUri
+import community.flock.wirespec.compiler.core.parse.ast.Annotation
 import community.flock.wirespec.compiler.core.parse.ast.Channel
 import community.flock.wirespec.compiler.core.parse.ast.Definition
 import community.flock.wirespec.compiler.core.parse.ast.DefinitionIdentifier
 import community.flock.wirespec.compiler.core.parse.ast.Endpoint
+import community.flock.wirespec.compiler.core.parse.ast.Field
 import community.flock.wirespec.compiler.core.parse.ast.FieldIdentifier
 import community.flock.wirespec.compiler.core.parse.ast.Identifier
 import community.flock.wirespec.compiler.core.parse.ast.Module
 import community.flock.wirespec.compiler.core.parse.ast.Reference
 import community.flock.wirespec.compiler.core.parse.ast.Root
+import community.flock.wirespec.compiler.core.parse.ast.Rpc
 import community.flock.wirespec.compiler.core.parse.ast.Type
 import community.flock.wirespec.compiler.utils.Logger
 import community.flock.wirespec.compiler.utils.noLogger
@@ -22,18 +25,34 @@ import java.io.File
 class Emitter {
 
     /**
-     * Custom emitter that also backticks field names starting with `_`.
+     * Custom emitter that also backticks field names starting with `_`, and renders
+     * annotations on RPCs and fields.
+     *
      * The upstream [WirespecEmitter] already backticks names that are reserved
      * keywords or start with an uppercase letter, but Wirespec syntax also
-     * requires underscore-leading field names to be quoted.
+     * requires underscore-leading field names to be quoted. It parses annotations
+     * but does not emit them, so GraphQL operation and argument metadata would
+     * otherwise be lost.
      */
     private val emitter = object : WirespecEmitter() {
         override fun emit(identifier: Identifier): String {
-            if (identifier is FieldIdentifier && identifier.value.startsWith("_")) {
+            if (
+                identifier is FieldIdentifier &&
+                (identifier.value.startsWith("_") || identifier.value == "channel")
+            ) {
                 return "`${identifier.value}`"
             }
             return super.emit(identifier)
         }
+
+        override fun emit(rpc: Rpc): String =
+            rpc.annotations.joinToString("") { "${it.render()}\n" } + super.emit(rpc)
+
+        override fun Field.emit(): String =
+            annotations.joinToString("") { "${it.render()}\n" } + "${emit(identifier)}: ${reference.emit()}"
+
+        override fun Type.Shape.emit(): String =
+            value.joinToString(",\n") { it.emit().prependIndent("  ") }
     }
     private val logger: Logger = noLogger
 
@@ -103,6 +122,24 @@ class Emitter {
         return emitter.emit(ast, logger).head.result
     }
 
+    /**
+     * `@Name`, `@Name("value")`, or `@Name(key: "value", …)` — rendered as Wirespec's own
+     * emitter does from wirespec PR #710 on, every value a quoted string.
+     */
+    private fun Annotation.render(): String {
+        if (parameters.isEmpty()) return "@$name"
+        val args = parameters.joinToString(", ") { p ->
+            (if (p.name == "default") "" else "${p.name}: ") + p.value.render()
+        }
+        return "@$name($args)"
+    }
+
+    private fun Annotation.Value.render(): String = when (this) {
+        is Annotation.Value.Single -> "\"${value.replace("\"", "\\\"")}\""
+        is Annotation.Value.Array -> if (value.isEmpty()) "[ ]" else value.joinToString(", ", "[", "]") { it.render() }
+        is Annotation.Value.Dict -> value.joinToString(", ", "{ ", " }") { "${it.name}: ${it.value.render()}" }
+    }
+
     private fun clearExistingWs(dir: File) {
         dir.walkTopDown()
             .filter { it.isFile && it.extension == "ws" }
@@ -114,8 +151,9 @@ class Emitter {
      * that has no fields and rewrite every reference to it into `Unit` — the
      * canonical "no content" reference. This covers all reference sites
      * (channel payloads, endpoint request/response bodies, path params, query
-     * and header fields, and fields of other types), which also guarantees no
-     * dangling reference is left pointing at a definition we removed.
+     * and header fields, RPC arguments and results, and fields of other types),
+     * which also guarantees no dangling reference is left pointing at a
+     * definition we removed.
      *
      * Runs before [deduplicateNames] so the freed type names are reflected in
      * the collision counts.
@@ -152,6 +190,13 @@ class Emitter {
                 responses = def.responses.map { it.copy(content = rewriteContent(it.content)) },
             )
             is Channel -> def.copy(reference = rewriteRef(def.reference))
+            is Rpc -> def.copy(
+                shape = def.shape.copy(
+                    value = def.shape.value.map { it.copy(reference = rewriteRef(it.reference)) }
+                ),
+                result = rewriteRef(def.result),
+                error = def.error?.let(::rewriteRef),
+            )
             is Type -> def.copy(
                 shape = def.shape.copy(
                     value = def.shape.value.map { it.copy(reference = rewriteRef(it.reference)) }
@@ -173,9 +218,9 @@ class Emitter {
      * Ensure every definition is uniquely named across *all* emitted files, not
      * just within one. A name that appears exactly once anywhere stays as-is; a
      * name that appears two or more times (endpoint↔endpoint across files,
-     * endpoint↔channel, endpoint↔type, …) gets a numeric suffix on *every*
-     * occurrence — `Foo1`, `Foo2`, `Foo3` — so no "winner" silently keeps the
-     * bare name.
+     * endpoint↔channel, rpc↔endpoint, endpoint↔type, …) gets a numeric suffix
+     * on *every* occurrence — `Foo1`, `Foo2`, `Foo3` — so no "winner" silently
+     * keeps the bare name.
      *
      * Types are never renamed: they're referenced by name from endpoints,
      * channels, and other types (across files via `types.ws`), and renaming
@@ -183,7 +228,7 @@ class Emitter {
      * when a type and an endpoint/channel share a name, only the
      * endpoint/channel receives a suffix.
      *
-     * Renaming endpoints/channels is safe globally because nothing references
+     * Renaming endpoints/channels/RPCs is safe globally because nothing references
      * them — they are leaves in the reference graph.
      */
     private fun deduplicateNames(
@@ -198,13 +243,13 @@ class Emitter {
         // Reserve every type name first so a suffixed endpoint never collides
         // with a type called `Foo1` either.
         val used = allDefs
-            .filter { it !is Endpoint && it !is Channel }
+            .filterNot { it.isOperation() }
             .mapTo(mutableSetOf()) { it.identifier.value.lowercase() }
 
         fun rename(def: Definition): Definition {
             val name = def.identifier.value
             return when {
-                def !is Endpoint && def !is Channel -> def
+                !def.isOperation() -> def
                 nameCounts.getValue(name.lowercase()) == 1 -> {
                     used.add(name.lowercase())
                     def
@@ -216,6 +261,7 @@ class Emitter {
                     when (def) {
                         is Endpoint -> def.copy(identifier = DefinitionIdentifier(newName))
                         is Channel  -> def.copy(identifier = DefinitionIdentifier(newName))
+                        is Rpc      -> def.copy(identifier = DefinitionIdentifier(newName))
                         else        -> def
                     }
                 }
@@ -232,4 +278,7 @@ class Emitter {
         val dedupedShared = sharedTypes.map(::rename)
         return dedupedControllers to dedupedShared
     }
+
+    /** Endpoints, channels, and RPCs: the renameable leaves of the reference graph. */
+    private fun Definition.isOperation(): Boolean = this is Endpoint || this is Channel || this is Rpc
 }

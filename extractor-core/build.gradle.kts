@@ -74,6 +74,11 @@ dependencies {
     // cleanly no-ops on projects that don't use Ktor.
     testImplementation(libs.ktor.server.core)
     testImplementation(libs.ktor.client.core)
+    // Spring for GraphQL is referenced ONLY from test code (real @QueryMapping /
+    // @Argument annotations for the GraphQL fixtures). Like the messaging brokers it
+    // is deliberately not on the main classpath: the GraphQL scanner reads its
+    // annotations by FQN, so extraction cleanly no-ops on projects that don't use it.
+    testImplementation(libs.spring.graphql)
 }
 
 tasks.test {

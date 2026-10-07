@@ -43,6 +43,10 @@ class ExtractMojo : AbstractMojo() {
     @Parameter(property = "wirespec.extractKtor", defaultValue = "true")
     var extractKtor: Boolean = true
 
+    /** Extract Spring for GraphQL queries, mutations, and subscriptions as Wirespec RPC functions. */
+    @Parameter(property = "wirespec.extractGraphQl", defaultValue = "true")
+    var extractGraphQl: Boolean = true
+
     /**
      * Bundle the `.ws` files into a jar and attach it under the `wirespec` classifier so install/deploy
      * publishes it. Pairs with [jarPath]: this switch turns jar packaging on, [jarPath] is the in-jar directory.
@@ -84,6 +88,7 @@ class ExtractMojo : AbstractMojo() {
                     extractSpring = extractSpring,
                     extractOpenApi = extractOpenApi,
                     extractKtor = extractKtor,
+                    extractGraphQl = extractGraphQl,
                     log = MavenExtractLog(log),
                 )
             )

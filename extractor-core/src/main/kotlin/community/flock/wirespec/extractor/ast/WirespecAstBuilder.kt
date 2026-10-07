@@ -1,6 +1,7 @@
 // src/main/kotlin/community/flock/wirespec/extractor/ast/WirespecAstBuilder.kt
 package community.flock.wirespec.extractor.ast
 
+import community.flock.wirespec.compiler.core.parse.ast.Annotation
 import community.flock.wirespec.compiler.core.parse.ast.Channel as WsChannel
 import community.flock.wirespec.compiler.core.parse.ast.Comment
 import community.flock.wirespec.compiler.core.parse.ast.Definition
@@ -11,12 +12,15 @@ import community.flock.wirespec.compiler.core.parse.ast.Field as WsField
 import community.flock.wirespec.compiler.core.parse.ast.FieldIdentifier
 import community.flock.wirespec.compiler.core.parse.ast.Reference
 import community.flock.wirespec.compiler.core.parse.ast.Refined as WsRefined
+import community.flock.wirespec.compiler.core.parse.ast.Rpc as WsRpc
 import community.flock.wirespec.compiler.core.parse.ast.Type as WsType
 import community.flock.wirespec.extractor.model.Channel
 import community.flock.wirespec.extractor.model.Endpoint
 import community.flock.wirespec.extractor.model.Endpoint.HttpMethod
 import community.flock.wirespec.extractor.model.Endpoint.PathSegment
+import community.flock.wirespec.extractor.model.GraphQlField
 import community.flock.wirespec.extractor.model.Param
+import community.flock.wirespec.extractor.model.Rpc
 import community.flock.wirespec.extractor.model.WireType
 
 class WirespecAstBuilder {
@@ -51,20 +55,60 @@ class WirespecAstBuilder {
         reference = toReference(c.payload),
     )
 
+    /**
+     * An RPC, annotated the way Wirespec's GraphQL converter (wirespec PR #710) does: with its
+     * operation type — `@GraphQLQuery`, `@GraphQLMutation`, or `@GraphQLSubscription` — and with
+     * `@GraphQLName` when the field name can't be read back from the RPC name.
+     */
+    fun toRpc(r: Rpc): WsRpc = WsRpc(
+        comment = null,
+        annotations = listOfNotNull(
+            Annotation(
+                "GraphQL${r.kind.typeName}",
+                listOfNotNull(
+                    Annotation.Parameter("default", Annotation.Value.Single(r.rootTypeName))
+                        .takeIf { r.rootTypeName != r.kind.typeName },
+                ),
+            ),
+            Annotation("GraphQLName", listOf(Annotation.Parameter("default", Annotation.Value.Single(r.field))))
+                .takeIf { r.name.replaceFirstChar(Char::lowercase) != r.field },
+        ),
+        identifier = DefinitionIdentifier(r.name),
+        shape = WsType.Shape(value = r.arguments.map { it.toField() }),
+        result = r.result?.let(::toReference) ?: Reference.Unit(false),
+        error = null,
+    )
+
+    fun toGraphQlType(name: String, fields: List<GraphQlField>): WsType = WsType(
+        comment = null,
+        annotations = emptyList(),
+        identifier = DefinitionIdentifier(name),
+        shape = WsType.Shape(
+            value = fields.map { field ->
+                WsField(
+                    annotations = field.arguments.map { argument ->
+                        Annotation(
+                            "GraphQLArgument",
+                            listOf(
+                                Annotation.Parameter("name", Annotation.Value.Single(argument.name)),
+                                Annotation.Parameter("type", Annotation.Value.Single(argument.type.toGraphQlType())),
+                            ),
+                        )
+                    },
+                    identifier = FieldIdentifier(field.field),
+                    reference = field.result?.let(::toReference) ?: Reference.Unit(false),
+                )
+            },
+        ),
+        extends = emptyList(),
+    )
+
     fun toDefinition(wt: WireType): Definition = when (wt) {
         is WireType.Object -> WsType(
             comment = wt.description?.let { Comment(it) },
             annotations = emptyList(),
             identifier = DefinitionIdentifier(wt.name),
-            shape = WsType.Shape(
-                value = wt.fields.map { f ->
-                    WsField(
-                        annotations = emptyList(),
-                        identifier = FieldIdentifier(f.name),
-                        reference = toReference(f.type),
-                    )
-                }
-            ),
+            shape = WsType.Shape(value = wt.fields.map { it.toField() }),
             extends = emptyList(),
         )
         is WireType.EnumDef -> WsEnum(
@@ -162,6 +206,35 @@ class WirespecAstBuilder {
     private fun PathSegment.toWs(): WsEndpoint.Segment = when (this) {
         is PathSegment.Literal  -> WsEndpoint.Segment.Literal(value)
         is PathSegment.Variable -> WsEndpoint.Segment.Param(FieldIdentifier(name), toReference(type))
+    }
+
+    private fun WireType.Field.toField(): WsField = WsField(
+        annotations = emptyList(),
+        identifier = FieldIdentifier(name),
+        reference = toReference(type),
+    )
+
+    private fun WireType.toGraphQlType(): String {
+        val base = when (this) {
+            is WireType.Any -> "JSON"
+            is WireType.Primitive -> when (kind) {
+                WireType.Primitive.Kind.STRING -> "String"
+                WireType.Primitive.Kind.INTEGER_32 -> "Int"
+                WireType.Primitive.Kind.INTEGER_64 -> "Long"
+                WireType.Primitive.Kind.NUMBER_32,
+                WireType.Primitive.Kind.NUMBER_64,
+                -> "Float"
+                WireType.Primitive.Kind.BOOLEAN -> "Boolean"
+                WireType.Primitive.Kind.BYTES -> "Bytes"
+            }
+            is WireType.Ref -> name
+            is WireType.ListOf -> "[${element.toGraphQlType()}]"
+            is WireType.MapOf -> "JSON"
+            is WireType.Object -> name
+            is WireType.EnumDef -> name
+            is WireType.Refined -> name
+        }
+        return if (nullable) base else "$base!"
     }
 
     private fun Param.toField(): WsField = WsField(

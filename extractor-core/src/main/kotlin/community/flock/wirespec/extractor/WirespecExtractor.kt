@@ -1,6 +1,7 @@
 package community.flock.wirespec.extractor
 
 import community.flock.wirespec.compiler.core.parse.ast.Definition
+import community.flock.wirespec.compiler.core.parse.ast.Type as WsType
 import community.flock.wirespec.extractor.ast.WirespecAstBuilder
 import community.flock.wirespec.extractor.classpath.ClasspathBuilder
 import community.flock.wirespec.extractor.emit.Emitter
@@ -9,6 +10,9 @@ import community.flock.wirespec.extractor.extract.TypeExtractor
 import community.flock.wirespec.extractor.extract.dsl.DslBytecodeWalker
 import community.flock.wirespec.extractor.extract.dsl.DslEndpointExtractor
 import community.flock.wirespec.extractor.extract.dsl.DslRouteScanner
+import community.flock.wirespec.extractor.extract.graphql.GraphQlRpcExtractor
+import community.flock.wirespec.extractor.extract.graphql.GraphQlRpcNaming
+import community.flock.wirespec.extractor.extract.graphql.GraphQlScanner
 import community.flock.wirespec.extractor.extract.jaxrs.JaxRsEndpointExtractor
 import community.flock.wirespec.extractor.extract.ktor.KtorClientExtractor
 import community.flock.wirespec.extractor.extract.ktor.KtorClientScanner
@@ -106,8 +110,19 @@ object WirespecExtractor {
                 }
             } else emptyList()
 
+            val graphQlControllers = if (config.extractGraphQl) {
+                GraphQlScanner.scan(
+                    loader, scanPackages, effectiveBasePackage,
+                    onWarn = { msg -> config.log.warn(msg) },
+                ).also {
+                    if (it.isNotEmpty()) config.log.info("Found ${it.size} GraphQL controller(s)")
+                }
+            } else emptyList()
+
+            // One class may be found by several scanners (a @Controller serving both
+            // @ResponseBody endpoints and GraphQL operations); that is not a collision.
             val collisions = detectControllerCollisions(
-                controllers + dslConfigs + jaxrsResources + ktorRoutingConfigs + ktorClients
+                (controllers + dslConfigs + jaxrsResources + ktorRoutingConfigs + ktorClients + graphQlControllers).distinct()
             )
             if (collisions.isNotEmpty()) {
                 val msg = collisions.entries.joinToString("; ") { (name, classes) ->
@@ -122,6 +137,7 @@ object WirespecExtractor {
             val jaxrsEndpoints = JaxRsEndpointExtractor(types, onWarn = { msg -> config.log.warn(msg) })
             val ktorEndpoints = KtorEndpointExtractor(types, loader, onWarn = { msg -> config.log.warn(msg) })
             val ktorClientEndpoints = KtorClientExtractor(types, loader, onWarn = { msg -> config.log.warn(msg) })
+            val graphQlRpcs = GraphQlRpcExtractor(types, onWarn = { msg -> config.log.warn(msg) })
             val builder = WirespecAstBuilder()
 
             val byController = controllers.associate { c ->
@@ -202,6 +218,29 @@ object WirespecExtractor {
                 }
             }
 
+            // -- GraphQL operations (Spring for GraphQL @QueryMapping/@MutationMapping/…) ----
+            // Extracted here, named and added once every type is known (see below).
+            val extractedRpcs = graphQlControllers.flatMap { controller ->
+                try {
+                    graphQlRpcs.extract(controller)
+                } catch (e: WirespecExtractorException) {
+                    throw e
+                } catch (t: Throwable) {
+                    config.log.warn("Skipping GraphQL ${controller.name}: ${t.message}")
+                    emptyList()
+                }
+            }
+            val extractedGraphQlFields = graphQlControllers.flatMap { controller ->
+                try {
+                    graphQlRpcs.extractFields(controller)
+                } catch (e: WirespecExtractorException) {
+                    throw e
+                } catch (t: Throwable) {
+                    config.log.warn("Skipping GraphQL fields from ${controller.name}: ${t.message}")
+                    emptyList()
+                }
+            }
+
             // -- Messaging channels (Kafka, JMS, Rabbit, Pulsar, Spring Integration) ----
             val messagingExtractor = MessagingChannelExtractor(types, onWarn = { msg -> config.log.warn(msg) })
             for (broker in if (config.extractSpring) MessagingBroker.ALL else emptyList()) {
@@ -236,9 +275,7 @@ object WirespecExtractor {
                 }
             }
 
-            val byControllerFinal = byController.filterValues { it.isNotEmpty() }
-
-            val allTypes = types.definitions.mapNotNull { def ->
+            val extractedTypes = types.definitions.mapNotNull { def ->
                 try {
                     builder.toDefinition(def)
                 } catch (e: WirespecExtractorException) {
@@ -248,6 +285,20 @@ object WirespecExtractor {
                     null
                 }
             }
+            val graphQlTypes = extractedGraphQlFields
+                .groupBy { it.parentTypeName }
+                .map { (typeName, fields) -> builder.toGraphQlType(typeName, fields.distinctBy { it.field }) }
+            val allTypes = mergeGraphQlTypes(extractedTypes, graphQlTypes)
+
+            // An RPC is named after its field unless a type (or an earlier RPC) holds that name,
+            // so naming waits until every type has been extracted.
+            val typeNames = allTypes.mapTo(mutableSetOf()) { it.identifier.value }
+            for (rpc in GraphQlRpcNaming.name(extractedRpcs, typeNames)) {
+                val key = rpc.ownerSimpleName
+                byController[key] = byController[key].orEmpty() + (builder.toRpc(rpc) as Definition)
+            }
+
+            val byControllerFinal = byController.filterValues { it.isNotEmpty() }
 
             val partition = TypeOwnership.partition(
                 endpointsByController = byControllerFinal,
@@ -281,6 +332,30 @@ internal fun detectControllerCollisions(controllers: List<Class<*>>): Map<String
 
 /** Normalises the raw `basePackage` parameter: blank or null becomes null. */
 internal fun effectiveBasePackage(raw: String?): String? = raw?.takeIf { it.isNotBlank() }
+
+private fun mergeGraphQlTypes(
+    extractedTypes: List<Definition>,
+    graphQlTypes: List<WsType>,
+): List<Definition> {
+    val graphQlByName = graphQlTypes.associateBy { it.identifier.value }
+    val mergedNames = extractedTypes.mapTo(mutableSetOf()) { it.identifier.value }
+    val merged = extractedTypes.map { definition ->
+        val graphQlType = graphQlByName[definition.identifier.value]
+        if (definition !is WsType || graphQlType == null) {
+            definition
+        } else {
+            val fieldsByName = graphQlType.shape.value.associateBy { it.identifier.value }
+            val existingNames = definition.shape.value.mapTo(mutableSetOf()) { it.identifier.value }
+            definition.copy(
+                shape = definition.shape.copy(
+                    value = definition.shape.value.map { fieldsByName[it.identifier.value] ?: it } +
+                        graphQlType.shape.value.filterNot { it.identifier.value in existingNames },
+                ),
+            )
+        }
+    }
+    return merged + graphQlTypes.filterNot { it.identifier.value in mergedNames }
+}
 
 /**
  * Asserts that [output] (or the nearest existing ancestor) is writable.
