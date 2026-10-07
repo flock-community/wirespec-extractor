@@ -4,6 +4,7 @@ import community.flock.wirespec.compiler.core.parse.ast.Channel as WsChannel
 import community.flock.wirespec.compiler.core.parse.ast.Definition
 import community.flock.wirespec.compiler.core.parse.ast.Endpoint as WsEndpoint
 import community.flock.wirespec.compiler.core.parse.ast.Reference
+import community.flock.wirespec.compiler.core.parse.ast.Rpc as WsRpc
 import community.flock.wirespec.compiler.core.parse.ast.Type as WsType
 
 /**
@@ -12,7 +13,7 @@ import community.flock.wirespec.compiler.core.parse.ast.Type as WsType
  *
  * A type "belongs" to a controller if it is reachable from any of that
  * controller's endpoint references (path params, queries, headers, request
- * content, response content), transitively through Object/Type field
+ * content, response content), channel payloads, or RPC arguments and results, transitively through Object/Type field
  * references. Enums and Refined definitions are leaves in the reference graph.
  *
  * Definitions reachable from exactly one controller are appended to that
@@ -47,6 +48,11 @@ internal object TypeOwnership {
             }
             defs.filterIsInstance<WsChannel>().forEach { ch ->
                 customNamesIn(ch).forEach { name ->
+                    if (visited.add(name)) frontier += name
+                }
+            }
+            defs.filterIsInstance<WsRpc>().forEach { rpc ->
+                customNamesIn(rpc).forEach { name ->
                     if (visited.add(name)) frontier += name
                 }
             }
@@ -122,6 +128,15 @@ internal object TypeOwnership {
     /** Names of every `Reference.Custom` reachable from a channel's payload reference. */
     internal fun customNamesIn(channel: WsChannel): Set<String> =
         customNamesIn(channel.reference).toSet()
+
+    /** Names of every `Reference.Custom` reachable from an RPC's arguments, result, and error. */
+    internal fun customNamesIn(rpc: WsRpc): Set<String> {
+        val out = linkedSetOf<String>()
+        rpc.shape.value.forEach { f -> out += customNamesIn(f.reference).toList() }
+        out += customNamesIn(rpc.result).toList()
+        rpc.error?.let { out += customNamesIn(it).toList() }
+        return out
+    }
 
     /** Names of every `Reference.Custom` reachable from a Type's shape fields and extends list. */
     internal fun customNamesIn(type: WsType): Set<String> {

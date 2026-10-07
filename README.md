@@ -6,9 +6,9 @@
 A Maven and Gradle plugin that scans a JVM application's compiled classes and emits
 [Wirespec](https://wirespec.io) (`.ws`) files describing its API. It reads Spring MVC /
 WebFlux controllers and functional routes, JAX-RS / OpenAPI resources, and Ktor server
-and client code for HTTP endpoints, plus Kafka, JMS, RabbitMQ, Pulsar, and Spring
-Integration listeners and producers as messaging channels — along with the DTO types
-they reference.
+and client code for HTTP endpoints, Spring for GraphQL controllers as RPC functions,
+plus Kafka, JMS, RabbitMQ, Pulsar, and Spring Integration listeners and producers as
+messaging channels — along with the DTO types they reference.
 
 ## Usage (Maven)
 
@@ -32,6 +32,7 @@ auto-binds to `process-classes`:
         <extractSpring>true</extractSpring>
         <extractOpenApi>true</extractOpenApi>
         <extractKtor>true</extractKtor>
+        <extractGraphQl>true</extractGraphQl>
         <!-- optional — jar packaging. jarEnabled and jarPath belong together:
              jarEnabled bundles the .ws files into a jar attached under the
              `wirespec` classifier so `mvn install`/`deploy` publishes it, and
@@ -116,6 +117,7 @@ wirespecExtractor {
     // extractSpring.set(true)    // Spring MVC controllers, DSL routes, messaging
     // extractOpenApi.set(true)   // JAX-RS resources + swagger annotations
     // extractKtor.set(true)      // Ktor server routing + client calls
+    // extractGraphQl.set(true)   // Spring for GraphQL operations as RPC functions
 
     // optional — jar packaging. jarEnabled and jarPath belong together:
     // jarEnabled bundles the .ws files into a `-wirespec`-classified jar and, when
@@ -156,6 +158,7 @@ wirespecExtractor {
     // extractSpring.set(true)
     // extractOpenApi.set(true)
     // extractKtor.set(true)
+    // extractGraphQl.set(true)
 }
 ```
 
@@ -229,6 +232,9 @@ path on one classpath.
 - Ktor server routing trees (`routing { route("/users") { get { … } } }`) and
   Ktor client request calls (`client.post("/users") { setBody(dto) }.body()`).
   See [Ktor extraction](#ktor-extraction-server--client).
+- Spring for GraphQL queries, mutations, and subscriptions — emitted as
+  Wirespec `rpc` functions. See
+  [GraphQL extraction](#graphql-extraction-spring-for-graphql).
 
 ### Generic types
 
@@ -706,6 +712,84 @@ class UserClient(private val client: HttpClient) {
 - Client URLs are read from the literal path string. Interpolated paths
   (`"/users/$id"`) are only partially recovered (the static portion), so dynamic
   segments may be missing.
+
+### GraphQL extraction (Spring for GraphQL)
+
+Spring for GraphQL annotated controllers are extracted as Wirespec **RPC
+functions** — not as HTTP endpoints, since every GraphQL operation shares one
+`POST /graphql` route. Each query, mutation, and subscription becomes one `rpc`
+whose fields are the operation's arguments and whose result is its return type:
+
+```kotlin
+@Controller
+class BookController {
+    @QueryMapping
+    fun bookById(@Argument id: String): Book? = …
+
+    @MutationMapping
+    fun addBook(@Argument input: BookInput): Mono<Book> = …
+
+    @SubscriptionMapping
+    fun bookAdded(): Flux<Book> = …
+
+    @SchemaMapping(typeName = "Book")   // field resolver — not an operation
+    fun author(book: Book): Author = …
+}
+```
+
+```wirespec
+rpc BookById {
+  id: String
+} -> Book?
+
+rpc AddBook {
+  input: BookInput
+} -> Book
+
+rpc BookAdded {} -> Book
+```
+
+- **Operations** come from `@QueryMapping`, `@MutationMapping`,
+  `@SubscriptionMapping`, and `@SchemaMapping` whose `typeName` (on the method,
+  or as a class-level default) is `Query`, `Mutation`, or `Subscription`.
+  Mappings on any other type are field resolvers and are skipped, as are
+  `@BatchMapping` methods.
+- **Names** are the GraphQL field name (the annotation's `name` / `field`, else
+  the method name), PascalCased: `bookById` → `BookById`.
+- **Arguments** come from `@Argument` parameters (name from the annotation, else
+  the parameter name). An `ArgumentValue<T>` argument becomes a nullable `T`. An
+  `@Arguments` object is spread into the argument list, field by field, without a
+  definition of its own. Other parameters — the source object,
+  `DataFetchingEnvironment`, `@ContextValue`, `Principal`, … — are not arguments
+  and are ignored.
+- **Results** are unwrapped from `Mono`, `Optional`, `CompletableFuture` /
+  `CompletionStage`, `Callable`, and `DataFetcherResult`, and from a `suspend`
+  function's continuation. A `Flux` / `Publisher` / `Flow` is a list for a query
+  or mutation; for a subscription it is the event stream, so the result is a
+  single event. A handler returning nothing results in `Unit`.
+- **Nullability** follows the same rules as the rest of the extractor: arguments
+  default to non-null (unless Kotlin-nullable, `@Nullable`, `Optional`, or
+  `ArgumentValue`), results default to nullable — GraphQL's own default — unless
+  Kotlin, a `@NonNull` annotation, a primitive, or a JSpecify `@NullMarked` scope
+  says otherwise.
+
+RPCs are grouped into the controller's `<Controller>.ws` file and the types they
+reference follow the usual ownership rules. Spring for GraphQL is matched by
+fully-qualified name, so it needs no GraphQL API on the extractor's classpath and
+cleanly no-ops on projects that don't use it. Toggle it with `extractGraphQl`
+(default `true`).
+
+**Limitations (v1):**
+
+- The GraphQL schema (`.graphqls`) is not read: the contract is derived from the
+  handler signatures. Fields that only exist through a `@SchemaMapping` /
+  `@BatchMapping` field resolver are missing from the emitted types, and DTO
+  properties not exposed in the schema are still emitted.
+- Wirespec's `rpc` carries no operation kind, so queries, mutations, and
+  subscriptions are emitted alike.
+- Root types renamed in the schema (`schema { query: MyQuery }`) are not
+  recognised; only `Query`, `Mutation`, and `Subscription`.
+- Netflix DGS (`@DgsQuery`, `@DgsMutation`, …) is not supported.
 
 ### Known limitations (v1)
 

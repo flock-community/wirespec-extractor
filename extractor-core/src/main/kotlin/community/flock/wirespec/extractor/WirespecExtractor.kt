@@ -9,6 +9,8 @@ import community.flock.wirespec.extractor.extract.TypeExtractor
 import community.flock.wirespec.extractor.extract.dsl.DslBytecodeWalker
 import community.flock.wirespec.extractor.extract.dsl.DslEndpointExtractor
 import community.flock.wirespec.extractor.extract.dsl.DslRouteScanner
+import community.flock.wirespec.extractor.extract.graphql.GraphQlRpcExtractor
+import community.flock.wirespec.extractor.extract.graphql.GraphQlScanner
 import community.flock.wirespec.extractor.extract.jaxrs.JaxRsEndpointExtractor
 import community.flock.wirespec.extractor.extract.ktor.KtorClientExtractor
 import community.flock.wirespec.extractor.extract.ktor.KtorClientScanner
@@ -106,8 +108,19 @@ object WirespecExtractor {
                 }
             } else emptyList()
 
+            val graphQlControllers = if (config.extractGraphQl) {
+                GraphQlScanner.scan(
+                    loader, scanPackages, effectiveBasePackage,
+                    onWarn = { msg -> config.log.warn(msg) },
+                ).also {
+                    if (it.isNotEmpty()) config.log.info("Found ${it.size} GraphQL controller(s)")
+                }
+            } else emptyList()
+
+            // One class may be found by several scanners (a @Controller serving both
+            // @ResponseBody endpoints and GraphQL operations); that is not a collision.
             val collisions = detectControllerCollisions(
-                controllers + dslConfigs + jaxrsResources + ktorRoutingConfigs + ktorClients
+                (controllers + dslConfigs + jaxrsResources + ktorRoutingConfigs + ktorClients + graphQlControllers).distinct()
             )
             if (collisions.isNotEmpty()) {
                 val msg = collisions.entries.joinToString("; ") { (name, classes) ->
@@ -122,6 +135,7 @@ object WirespecExtractor {
             val jaxrsEndpoints = JaxRsEndpointExtractor(types, onWarn = { msg -> config.log.warn(msg) })
             val ktorEndpoints = KtorEndpointExtractor(types, loader, onWarn = { msg -> config.log.warn(msg) })
             val ktorClientEndpoints = KtorClientExtractor(types, loader, onWarn = { msg -> config.log.warn(msg) })
+            val graphQlRpcs = GraphQlRpcExtractor(types, onWarn = { msg -> config.log.warn(msg) })
             val builder = WirespecAstBuilder()
 
             val byController = controllers.associate { c ->
@@ -199,6 +213,22 @@ object WirespecExtractor {
                 if (eps.isNotEmpty()) {
                     val key = clientClass.simpleName
                     byController[key] = byController[key].orEmpty() + eps.map { it as Definition }
+                }
+            }
+
+            // -- GraphQL operations (Spring for GraphQL @QueryMapping/@MutationMapping/…) ----
+            for (controller in graphQlControllers) {
+                val rpcs = try {
+                    graphQlRpcs.extract(controller).map(builder::toRpc)
+                } catch (e: WirespecExtractorException) {
+                    throw e
+                } catch (t: Throwable) {
+                    config.log.warn("Skipping GraphQL ${controller.name}: ${t.message}")
+                    emptyList()
+                }
+                if (rpcs.isNotEmpty()) {
+                    val key = controller.simpleName
+                    byController[key] = byController[key].orEmpty() + rpcs.map { it as Definition }
                 }
             }
 

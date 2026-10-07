@@ -11,12 +11,14 @@ import community.flock.wirespec.compiler.core.parse.ast.Field as WsField
 import community.flock.wirespec.compiler.core.parse.ast.FieldIdentifier
 import community.flock.wirespec.compiler.core.parse.ast.Reference
 import community.flock.wirespec.compiler.core.parse.ast.Refined as WsRefined
+import community.flock.wirespec.compiler.core.parse.ast.Rpc as WsRpc
 import community.flock.wirespec.compiler.core.parse.ast.Type as WsType
 import community.flock.wirespec.extractor.model.Channel
 import community.flock.wirespec.extractor.model.Endpoint
 import community.flock.wirespec.extractor.model.Endpoint.HttpMethod
 import community.flock.wirespec.extractor.model.Endpoint.PathSegment
 import community.flock.wirespec.extractor.model.Param
+import community.flock.wirespec.extractor.model.Rpc
 import community.flock.wirespec.extractor.model.WireType
 
 class WirespecAstBuilder {
@@ -51,20 +53,21 @@ class WirespecAstBuilder {
         reference = toReference(c.payload),
     )
 
+    fun toRpc(r: Rpc): WsRpc = WsRpc(
+        comment = null,
+        annotations = emptyList(),
+        identifier = DefinitionIdentifier(r.name),
+        shape = WsType.Shape(value = r.arguments.map { it.toField() }),
+        result = r.result?.let(::toReference) ?: Reference.Unit(false),
+        error = null,
+    )
+
     fun toDefinition(wt: WireType): Definition = when (wt) {
         is WireType.Object -> WsType(
             comment = wt.description?.let { Comment(it) },
             annotations = emptyList(),
             identifier = DefinitionIdentifier(wt.name),
-            shape = WsType.Shape(
-                value = wt.fields.map { f ->
-                    WsField(
-                        annotations = emptyList(),
-                        identifier = FieldIdentifier(f.name),
-                        reference = toReference(f.type),
-                    )
-                }
-            ),
+            shape = WsType.Shape(value = wt.fields.map { it.toField() }),
             extends = emptyList(),
         )
         is WireType.EnumDef -> WsEnum(
@@ -163,6 +166,12 @@ class WirespecAstBuilder {
         is PathSegment.Literal  -> WsEndpoint.Segment.Literal(value)
         is PathSegment.Variable -> WsEndpoint.Segment.Param(FieldIdentifier(name), toReference(type))
     }
+
+    private fun WireType.Field.toField(): WsField = WsField(
+        annotations = emptyList(),
+        identifier = FieldIdentifier(name),
+        reference = toReference(type),
+    )
 
     private fun Param.toField(): WsField = WsField(
         annotations = emptyList(),

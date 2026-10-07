@@ -14,6 +14,7 @@ import community.flock.wirespec.extractor.model.Endpoint
 import community.flock.wirespec.extractor.model.Endpoint.HttpMethod
 import community.flock.wirespec.extractor.model.Endpoint.PathSegment
 import community.flock.wirespec.extractor.model.Param
+import community.flock.wirespec.extractor.model.Rpc
 import community.flock.wirespec.extractor.model.WireType
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
@@ -609,6 +610,72 @@ class EmitterTest {
         }
         val parsed = ctx.parse(nonEmptyListOf(ModuleContent(FileUri("types.ws"), types)))
         parsed.isRight() shouldBe true
+    }
+
+    @Test
+    fun `rpc definitions render with arguments and result and parse back`(@TempDir dir: Path) {
+        val withArgs = builder.toRpc(Rpc(
+            ownerSimpleName = "BookController",
+            name = "BookById",
+            arguments = listOf(
+                WireType.Field("id", WireType.Primitive(WireType.Primitive.Kind.STRING)),
+                WireType.Field("_version", WireType.Primitive(WireType.Primitive.Kind.INTEGER_32, nullable = true)),
+            ),
+            result = WireType.Ref("Book", nullable = true),
+        ))
+        val noArgs = builder.toRpc(Rpc("BookController", "AllBooks", emptyList(), WireType.ListOf(WireType.Ref("Book"))))
+        val noResult = builder.toRpc(Rpc("BookController", "Reset", emptyList(), null))
+        val book = builder.toDefinition(WireType.Object(
+            name = "Book",
+            fields = listOf(WireType.Field("title", WireType.Primitive(WireType.Primitive.Kind.STRING))),
+        ))
+
+        emitter.write(
+            outputDir = dir.toFile(),
+            controllerDefinitions = mapOf("BookController" to listOf(withArgs, noArgs, noResult, book)),
+            sharedTypes = emptyList(),
+        )
+        val out = File(dir.toFile(), "BookController.ws").readText()
+
+        out shouldContain "rpc BookById {\n  id: String,\n  `_version`: Integer32?\n} -> Book?"
+        out shouldContain "rpc AllBooks {} -> Book[]"
+        out shouldContain "rpc Reset {} -> Unit"
+
+        val ctx = object : ParseContext {
+            override val logger = noLogger
+        }
+        ctx.parse(nonEmptyListOf(ModuleContent(FileUri("BookController.ws"), out))).isRight() shouldBe true
+    }
+
+    @Test
+    fun `rpc sharing a name with an endpoint is suffixed and empty types become Unit`(@TempDir dir: Path) {
+        val ep = builder.toEndpoint(Endpoint(
+            controllerSimpleName = "BookController",
+            name = "Books",
+            method = HttpMethod.GET,
+            pathSegments = listOf(PathSegment.Literal("books")),
+            queryParams = emptyList(), headerParams = emptyList(), cookieParams = emptyList(),
+            requestBody = null,
+            responses = listOf(Endpoint.Response(200, null)),
+        ))
+        val rpc = builder.toRpc(Rpc(
+            ownerSimpleName = "BookController",
+            name = "Books",
+            arguments = listOf(WireType.Field("filter", WireType.Ref("Filter"))),
+            result = WireType.Ref("Filter"),
+        ))
+        val emptyType = builder.toDefinition(WireType.Object(name = "Filter", fields = emptyList()))
+
+        emitter.write(
+            outputDir = dir.toFile(),
+            controllerDefinitions = mapOf("BookController" to listOf(ep, rpc, emptyType)),
+            sharedTypes = emptyList(),
+        )
+        val out = File(dir.toFile(), "BookController.ws").readText()
+
+        out shouldContain "endpoint Books1 "
+        out shouldContain "rpc Books2 {\n  filter: Unit\n} -> Unit"
+        out shouldNotContain "type Filter"
     }
 
     @Suppress("unused")

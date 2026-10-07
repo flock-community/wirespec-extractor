@@ -38,6 +38,7 @@ class WirespecExtractorPlugin : Plugin<Project> {
             extractSpring.convention(true)
             extractOpenApi.convention(true)
             extractKtor.convention(true)
+            extractGraphQl.convention(true)
             jarEnabled.convention(false)
             jarPath.convention(project.name)
         }
@@ -55,6 +56,7 @@ class WirespecExtractorPlugin : Plugin<Project> {
                 t.extractSpring.convention(ext.extractSpring)
                 t.extractOpenApi.convention(ext.extractOpenApi)
                 t.extractKtor.convention(ext.extractKtor)
+                t.extractGraphQl.convention(ext.extractGraphQl)
                 // Make sure compile runs first — classes producers wire the dependency.
                 t.dependsOn(main.output.classesDirs)
             }
