@@ -13,6 +13,7 @@ import community.flock.wirespec.compiler.core.parse.ast.FieldIdentifier
 import community.flock.wirespec.compiler.core.parse.ast.Reference
 import community.flock.wirespec.compiler.core.parse.ast.Refined as WsRefined
 import community.flock.wirespec.compiler.core.parse.ast.Rpc as WsRpc
+import community.flock.wirespec.compiler.core.parse.ast.Shape
 import community.flock.wirespec.compiler.core.parse.ast.Type as WsType
 import community.flock.wirespec.extractor.model.Channel
 import community.flock.wirespec.extractor.model.Endpoint
@@ -31,8 +32,8 @@ class WirespecAstBuilder {
         identifier = DefinitionIdentifier(ep.name),
         method = ep.method.toWs(),
         path = ep.pathSegments.map { it.toWs() },
-        queries = ep.queryParams.map { it.toField() },
-        headers = ep.headerParams.map { it.toField() },
+        queries = Shape(ep.queryParams.map { it.toField() }),
+        headers = Shape(ep.headerParams.map { it.toField() }),
         requests = listOf(
             WsEndpoint.Request(
                 content = ep.requestBody?.let { WsEndpoint.Content("application/json", toReference(it)) }
@@ -41,7 +42,7 @@ class WirespecAstBuilder {
         responses = ep.responses.map { r ->
             WsEndpoint.Response(
                 status = r.statusCode.toString(),
-                headers = emptyList(),
+                headers = Shape(emptyList()),
                 content = r.body?.let { WsEndpoint.Content("application/json", toReference(it)) },
                 annotations = emptyList(),
             )
@@ -74,24 +75,29 @@ class WirespecAstBuilder {
                 .takeIf { r.name.replaceFirstChar(Char::lowercase) != r.field },
         ),
         identifier = DefinitionIdentifier(r.name),
-        shape = WsType.Shape(value = r.arguments.map { it.toField() }),
+        shape = Shape(r.arguments.map { it.toField() }),
         result = r.result?.let(::toReference) ?: Reference.Unit(false),
         error = null,
     )
 
-    fun toGraphQlType(name: String, fields: List<GraphQlField>): WsType = WsType(
+    /**
+     * A GraphQL object type holding fields resolved by non-root `@SchemaMapping`s. Their
+     * arguments are written as `@GraphQLArgument(name: …, type: …)`, the type in GraphQL
+     * syntax with input objects under their GraphQL input name from [inputNames].
+     */
+    fun toGraphQlType(name: String, fields: List<GraphQlField>, inputNames: Map<String, String> = emptyMap()): WsType = WsType(
         comment = null,
         annotations = emptyList(),
         identifier = DefinitionIdentifier(name),
-        shape = WsType.Shape(
-            value = fields.map { field ->
+        shape = Shape(
+            fields.map { field ->
                 WsField(
                     annotations = field.arguments.map { argument ->
                         Annotation(
                             "GraphQLArgument",
                             listOf(
                                 Annotation.Parameter("name", Annotation.Value.Single(argument.name)),
-                                Annotation.Parameter("type", Annotation.Value.Single(argument.type.toGraphQlType())),
+                                Annotation.Parameter("type", Annotation.Value.Single(argument.type.toGraphQlType(inputNames))),
                             ),
                         )
                     },
@@ -108,7 +114,7 @@ class WirespecAstBuilder {
             comment = wt.description?.let { Comment(it) },
             annotations = emptyList(),
             identifier = DefinitionIdentifier(wt.name),
-            shape = WsType.Shape(value = wt.fields.map { it.toField() }),
+            shape = Shape(wt.fields.map { it.toField() }),
             extends = emptyList(),
         )
         is WireType.EnumDef -> WsEnum(
@@ -214,23 +220,30 @@ class WirespecAstBuilder {
         reference = toReference(type),
     )
 
-    private fun WireType.toGraphQlType(): String {
+    /**
+     * The GraphQL type of an argument, mapped as Wirespec's GraphQL converter maps a
+     * reference: any `Integer` is an `Int` and any `Number` a `Float`, `Bytes` go as a
+     * `String`, and `Any` and dictionaries become the `JSON` scalar.
+     */
+    private fun WireType.toGraphQlType(inputNames: Map<String, String>): String {
         val base = when (this) {
             is WireType.Any -> "JSON"
             is WireType.Primitive -> when (kind) {
-                WireType.Primitive.Kind.STRING -> "String"
-                WireType.Primitive.Kind.INTEGER_32 -> "Int"
-                WireType.Primitive.Kind.INTEGER_64 -> "Long"
+                WireType.Primitive.Kind.STRING,
+                WireType.Primitive.Kind.BYTES,
+                -> "String"
+                WireType.Primitive.Kind.INTEGER_32,
+                WireType.Primitive.Kind.INTEGER_64,
+                -> "Int"
                 WireType.Primitive.Kind.NUMBER_32,
                 WireType.Primitive.Kind.NUMBER_64,
                 -> "Float"
                 WireType.Primitive.Kind.BOOLEAN -> "Boolean"
-                WireType.Primitive.Kind.BYTES -> "Bytes"
             }
-            is WireType.Ref -> name
-            is WireType.ListOf -> "[${element.toGraphQlType()}]"
+            is WireType.Ref -> inputNames[name] ?: name
+            is WireType.ListOf -> "[${element.toGraphQlType(inputNames)}]"
             is WireType.MapOf -> "JSON"
-            is WireType.Object -> name
+            is WireType.Object -> inputNames[name] ?: name
             is WireType.EnumDef -> name
             is WireType.Refined -> name
         }

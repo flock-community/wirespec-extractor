@@ -26,8 +26,9 @@ object GraphQlFixtureVerifier {
         ws shouldContain "@GraphQLSubscription\nrpc BookAdded {} -> Book"
         // `book` is taken by `type Book`: prefixed with the root type, field name kept.
         ws shouldContain "@GraphQLQuery\n@GraphQLName(\"book\")\nrpc QueryBook {\n  id: String\n} -> Book?"
-        ws shouldContain "type Book {"
-        ws shouldContain "type BookInput {"
+        ws shouldContain "\ntype Book {"
+        // Only ever taken: an input object, marked as the GraphQL converter writes it.
+        ws shouldContain "@GraphQLInput\ntype BookInput {"
         ws shouldContain "enum Genre {"
         ws shouldContain "author: Author"
         ws shouldContain "type Author {"

@@ -1,11 +1,12 @@
 package community.flock.wirespec.extractor
 
-import arrow.core.nonEmptyListOf
+import arrow.core.toNonEmptyListOrNull
 import community.flock.wirespec.compiler.core.FileUri
 import community.flock.wirespec.compiler.core.ModuleContent
 import community.flock.wirespec.compiler.core.ParseContext
 import community.flock.wirespec.compiler.core.parse
 import community.flock.wirespec.compiler.utils.noLogger
+import community.flock.wirespec.converter.graphql.GraphQLEmitter
 import community.flock.wirespec.extractor.fixtures.graphql.BookController
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.shouldBe
@@ -34,7 +35,7 @@ class GraphQlExtractionTest {
         val files = extract(tmp)
         files.map { it.name } shouldContainExactlyInAnyOrder listOf(
             "BookController.ws", "LibraryAdminController.ws", "MixedLibraryController.ws",
-            "LibraryNamespaceController.ws", "LibraryNamespaceFieldsController.ws",
+            "LibraryNamespaceController.ws", "LibraryNamespaceFieldsController.ws", "ReviewController.ws",
         )
 
         val ws = files.single { it.name == "BookController.ws" }.readText()
@@ -83,12 +84,62 @@ class GraphQlExtractionTest {
             namespace shouldNotContain "type LibraryQuery"
         }
 
-        // The annotated output parses back with Wirespec 0.21.
-        val ctx = object : ParseContext {
-            override val logger = noLogger
-        }
-        ctx.parse(nonEmptyListOf(ModuleContent(FileUri("BookController.ws"), ws))).isRight() shouldBe true
+        // The annotated output parses back with Wirespec.
+        parse(files).isRight() shouldBe true
     }
+
+    @Test
+    fun `input objects are marked @GraphQLInput as the GraphQL converter writes them`(@TempDir tmp: Path) {
+        val files = extract(tmp)
+        val books = files.single { it.name == "BookController.ws" }.readText()
+        val reviews = files.single { it.name == "ReviewController.ws" }.readText()
+
+        // Only ever taken: an input object.
+        books shouldContain "@GraphQLInput\ntype BookInput {"
+        // Returned: an object type.
+        books shouldContain "\ntype Book {"
+        books shouldNotContain "@GraphQLInput\ntype Book {"
+        // Taken and returned: left unmarked, so the converter writes it twice.
+        reviews shouldContain "\ntype Shelf {"
+        reviews shouldNotContain "@GraphQLInput"
+    }
+
+    @Test
+    fun `field resolver arguments carry GraphQL types as the GraphQL converter reads them`(@TempDir tmp: Path) {
+        val books = extract(tmp).single { it.name == "BookController.ws" }.readText()
+
+        books shouldContain """
+            |  @GraphQLArgument(name: "first", type: "Int!")
+            |  @GraphQLArgument(name: "filter", type: "ReviewFilter")
+            |  @GraphQLArgument(name: "shelf", type: "ShelfInput")
+            |  reviews: Review[]
+        """.trimMargin()
+        // The argument's input type lives next to the type that takes it.
+        books shouldContain "@GraphQLInput\ntype ReviewFilter {"
+    }
+
+    @Test
+    fun `extracted operations convert to a GraphQL schema with Wirespec's GraphQL converter`(@TempDir tmp: Path) {
+        val ast = parse(extract(tmp)).getOrNull()!!
+        val schema = GraphQLEmitter.emit(ast, noLogger).head.result
+
+        // Root fields, under their GraphQL field names: `QueryBook` reads back as `book`.
+        schema shouldContain "type Query {\n  book(\n    id: String!\n  ): Book\n  bookById("
+        schema shouldContain "  addBook(\n    input: BookInput!\n  ): Book!"
+        schema shouldContain "type Subscription {\n  bookAdded(\n    genre: Genre\n  ): Book!\n}"
+        // Input objects: only taken, or a copy of a type that is also returned.
+        schema shouldContain "input BookInput {"
+        schema shouldContain "input ReviewFilter {"
+        schema shouldContain "type Shelf {"
+        schema shouldContain "input ShelfInput {"
+        schema shouldContain "  moveShelf(\n    shelf: ShelfInput!\n  ): Boolean!"
+        // A field resolver with its arguments.
+        schema shouldContain "  reviews(\n    first: Int!\n    filter: ReviewFilter\n    shelf: ShelfInput\n  ): [Review!]!"
+    }
+
+    private fun parse(files: List<File>) = object : ParseContext {
+        override val logger = noLogger
+    }.parse(files.map { ModuleContent(FileUri(it.name), it.readText()) }.toNonEmptyListOrNull()!!)
 
     @Test
     fun `a controller with both REST endpoints and GraphQL operations gets both in one file`(@TempDir tmp: Path) {

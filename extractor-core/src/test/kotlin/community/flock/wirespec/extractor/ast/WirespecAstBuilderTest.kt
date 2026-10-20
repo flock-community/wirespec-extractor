@@ -3,6 +3,7 @@ package community.flock.wirespec.extractor.ast
 
 import community.flock.wirespec.compiler.core.parse.ast.Endpoint as WsEndpoint
 import community.flock.wirespec.compiler.core.parse.ast.Enum as WsEnum
+import community.flock.wirespec.compiler.core.parse.ast.Field as WsField
 import community.flock.wirespec.compiler.core.parse.ast.Reference
 import community.flock.wirespec.compiler.core.parse.ast.Type as WsType
 import community.flock.wirespec.extractor.model.Endpoint
@@ -52,7 +53,7 @@ class WirespecAstBuilderTest {
         )
         val def = builder.toDefinition(obj)
         def.shouldBeInstanceOf<WsType>().identifier.value shouldBe "UserDto"
-        (def as WsType).shape.value.map { it.identifier.value } shouldBe listOf("id", "age")
+        (def as WsType).shape.value.map { (it as WsField).identifier.value } shouldBe listOf("id", "age")
     }
 
     @Test

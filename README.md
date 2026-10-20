@@ -761,7 +761,13 @@ rpc BookAdded {} -> Book
   `Subscription` are also emitted as RPCs. For example, fields mapped to
   `NotificationsQuery` carry `@GraphQLQuery("NotificationsQuery")`.
 - **Object fields** come from other `@SchemaMapping` methods on non-root types.
-  Their `@Argument` parameters are retained as `@GraphQLArgument` metadata.
+  Their `@Argument` parameters are retained as `@GraphQLArgument(name: …, type: …)`
+  metadata, the type written in GraphQL syntax (`Int!`, `[String]`, `ReviewFilter`).
+- **Input objects** are told apart the way Wirespec's GraphQL converter does: a type
+  an argument reaches, directly or through its fields, is an input. One that is only
+  ever taken is marked `@GraphQLInput`; one that is also returned stays a plain
+  `type`, which the converter writes twice — as an object type and as an input object
+  named `...Input`.
 - **Operation type** is stated as a `@GraphQLQuery`, `@GraphQLMutation`, or
   `@GraphQLSubscription` annotation on the `rpc`.
 - **Names** are the GraphQL field name (the annotation's `name` / `field`, else
@@ -786,8 +792,13 @@ rpc BookAdded {} -> Book
   Kotlin, a `@NonNull` annotation, a primitive, or a JSpecify `@NullMarked` scope
   says otherwise.
 
+The output converts back into a GraphQL schema with Wirespec's GraphQL converter —
+`GraphQLEmitter` in the `community.flock.wirespec.converter:graphql` library, or the
+[playground](https://playground.wirespec.io/?specification=wirespec&emitter=graphql).
+
 RPCs are grouped into the controller's `<Controller>.ws` file and the types they
-reference follow the usual ownership rules. Spring for GraphQL is matched by
+reference follow the usual ownership rules; a type only taken by a field argument
+lives with the type that declares the field. Spring for GraphQL is matched by
 fully-qualified name, so it needs no GraphQL API on the extractor's classpath and
 cleanly no-ops on projects that don't use it. Toggle it with `extractGraphQl`
 (default `true`).

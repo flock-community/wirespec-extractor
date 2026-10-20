@@ -79,6 +79,9 @@ dependencies {
     // is deliberately not on the main classpath: the GraphQL scanner reads its
     // annotations by FQN, so extraction cleanly no-ops on projects that don't use it.
     testImplementation(libs.spring.graphql)
+    // Wirespec's own GraphQL converter, to check that extracted GraphQL operations read back
+    // as the GraphQL schema they came from.
+    testImplementation(libs.wirespec.converter.graphql)
 }
 
 tasks.test {

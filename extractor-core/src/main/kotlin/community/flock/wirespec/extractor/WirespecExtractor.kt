@@ -1,6 +1,9 @@
 package community.flock.wirespec.extractor
 
+import community.flock.wirespec.compiler.core.parse.ast.Annotation
 import community.flock.wirespec.compiler.core.parse.ast.Definition
+import community.flock.wirespec.compiler.core.parse.ast.Field as WsField
+import community.flock.wirespec.compiler.core.parse.ast.Shape as WsShape
 import community.flock.wirespec.compiler.core.parse.ast.Type as WsType
 import community.flock.wirespec.extractor.ast.WirespecAstBuilder
 import community.flock.wirespec.extractor.classpath.ClasspathBuilder
@@ -10,6 +13,7 @@ import community.flock.wirespec.extractor.extract.TypeExtractor
 import community.flock.wirespec.extractor.extract.dsl.DslBytecodeWalker
 import community.flock.wirespec.extractor.extract.dsl.DslEndpointExtractor
 import community.flock.wirespec.extractor.extract.dsl.DslRouteScanner
+import community.flock.wirespec.extractor.extract.graphql.GraphQlInputs
 import community.flock.wirespec.extractor.extract.graphql.GraphQlRpcExtractor
 import community.flock.wirespec.extractor.extract.graphql.GraphQlRpcNaming
 import community.flock.wirespec.extractor.extract.graphql.GraphQlScanner
@@ -24,6 +28,7 @@ import community.flock.wirespec.extractor.extract.messaging.MessagingChannelExtr
 import community.flock.wirespec.extractor.extract.messaging.MessagingListenerScanner
 import community.flock.wirespec.extractor.extract.messaging.MessagingProducerScanner
 import community.flock.wirespec.extractor.extract.messaging.MessagingProducerWalker
+import community.flock.wirespec.extractor.model.WireType
 import community.flock.wirespec.extractor.ownership.TypeOwnership
 import community.flock.wirespec.extractor.scan.ControllerScanner
 import community.flock.wirespec.extractor.scan.JaxRsResourceScanner
@@ -285,10 +290,21 @@ object WirespecExtractor {
                     null
                 }
             }
+            // Input objects are told apart the way Wirespec's GraphQL converter does: a type an
+            // argument reaches is an input, and one that is only ever taken is marked @GraphQLInput.
+            val graphQlInputs = GraphQlInputs.of(
+                objects = types.definitions.filterIsInstance<WireType.Object>().associate { o -> o.name to o.fields.map { it.type } },
+                rpcs = extractedRpcs,
+                fields = extractedGraphQlFields,
+            )
             val graphQlTypes = extractedGraphQlFields
                 .groupBy { it.parentTypeName }
-                .map { (typeName, fields) -> builder.toGraphQlType(typeName, fields.distinctBy { it.field }) }
-            val allTypes = mergeGraphQlTypes(extractedTypes, graphQlTypes)
+                .map { (typeName, fields) -> builder.toGraphQlType(typeName, fields.distinctBy { it.field }, graphQlInputs.inputNames) }
+            val allTypes = mergeGraphQlTypes(extractedTypes, graphQlTypes).map { definition ->
+                if (definition is WsType && definition.identifier.value in graphQlInputs.inputOnly) {
+                    definition.copy(annotations = definition.annotations + Annotation("GraphQLInput", emptyList()))
+                } else definition
+            }
 
             // An RPC is named after its field unless a type (or an earlier RPC) holds that name,
             // so naming waits until every type has been extracted.
@@ -344,12 +360,13 @@ private fun mergeGraphQlTypes(
         if (definition !is WsType || graphQlType == null) {
             definition
         } else {
-            val fieldsByName = graphQlType.shape.value.associateBy { it.identifier.value }
-            val existingNames = definition.shape.value.mapTo(mutableSetOf()) { it.identifier.value }
+            val graphQlFields = graphQlType.shape.value.filterIsInstance<WsField>()
+            val fieldsByName = graphQlFields.associateBy { it.identifier.value }
+            val existingNames = definition.shape.value.filterIsInstance<WsField>().mapTo(mutableSetOf()) { it.identifier.value }
             definition.copy(
-                shape = definition.shape.copy(
-                    value = definition.shape.value.map { fieldsByName[it.identifier.value] ?: it } +
-                        graphQlType.shape.value.filterNot { it.identifier.value in existingNames },
+                shape = WsShape(
+                    definition.shape.value.map { entry -> (entry as? WsField)?.let { fieldsByName[it.identifier.value] } ?: entry } +
+                        graphQlFields.filterNot { it.identifier.value in existingNames },
                 ),
             )
         }

@@ -4,18 +4,16 @@ package community.flock.wirespec.extractor.emit
 import arrow.core.NonEmptyList
 import arrow.core.toNonEmptyListOrNull
 import community.flock.wirespec.compiler.core.FileUri
-import community.flock.wirespec.compiler.core.parse.ast.Annotation
 import community.flock.wirespec.compiler.core.parse.ast.Channel
 import community.flock.wirespec.compiler.core.parse.ast.Definition
 import community.flock.wirespec.compiler.core.parse.ast.DefinitionIdentifier
 import community.flock.wirespec.compiler.core.parse.ast.Endpoint
 import community.flock.wirespec.compiler.core.parse.ast.Field
-import community.flock.wirespec.compiler.core.parse.ast.FieldIdentifier
-import community.flock.wirespec.compiler.core.parse.ast.Identifier
 import community.flock.wirespec.compiler.core.parse.ast.Module
 import community.flock.wirespec.compiler.core.parse.ast.Reference
 import community.flock.wirespec.compiler.core.parse.ast.Root
 import community.flock.wirespec.compiler.core.parse.ast.Rpc
+import community.flock.wirespec.compiler.core.parse.ast.Shape
 import community.flock.wirespec.compiler.core.parse.ast.Type
 import community.flock.wirespec.compiler.utils.Logger
 import community.flock.wirespec.compiler.utils.noLogger
@@ -25,35 +23,11 @@ import java.io.File
 class Emitter {
 
     /**
-     * Custom emitter that also backticks field names starting with `_`, and renders
-     * annotations on RPCs and fields.
-     *
-     * The upstream [WirespecEmitter] already backticks names that are reserved
-     * keywords or start with an uppercase letter, but Wirespec syntax also
-     * requires underscore-leading field names to be quoted. It parses annotations
-     * but does not emit them, so GraphQL operation and argument metadata would
-     * otherwise be lost.
+     * Wirespec's own emitter. Since Wirespec 0.22 it renders annotations — the GraphQL
+     * metadata on RPCs and fields — and backticks every field name that isn't a plain
+     * identifier (`_version`, `channel`), so nothing needs overriding.
      */
-    private val emitter = object : WirespecEmitter() {
-        override fun emit(identifier: Identifier): String {
-            if (
-                identifier is FieldIdentifier &&
-                (identifier.value.startsWith("_") || identifier.value == "channel")
-            ) {
-                return "`${identifier.value}`"
-            }
-            return super.emit(identifier)
-        }
-
-        override fun emit(rpc: Rpc): String =
-            rpc.annotations.joinToString("") { "${it.render()}\n" } + super.emit(rpc)
-
-        override fun Field.emit(): String =
-            annotations.joinToString("") { "${it.render()}\n" } + "${emit(identifier)}: ${reference.emit()}"
-
-        override fun Type.Shape.emit(): String =
-            value.joinToString(",\n") { it.emit().prependIndent("  ") }
-    }
+    private val emitter = WirespecEmitter()
     private val logger: Logger = noLogger
 
     /**
@@ -122,24 +96,6 @@ class Emitter {
         return emitter.emit(ast, logger).head.result
     }
 
-    /**
-     * `@Name`, `@Name("value")`, or `@Name(key: "value", …)` — rendered as Wirespec's own
-     * emitter does from wirespec PR #710 on, every value a quoted string.
-     */
-    private fun Annotation.render(): String {
-        if (parameters.isEmpty()) return "@$name"
-        val args = parameters.joinToString(", ") { p ->
-            (if (p.name == "default") "" else "${p.name}: ") + p.value.render()
-        }
-        return "@$name($args)"
-    }
-
-    private fun Annotation.Value.render(): String = when (this) {
-        is Annotation.Value.Single -> "\"${value.replace("\"", "\\\"")}\""
-        is Annotation.Value.Array -> if (value.isEmpty()) "[ ]" else value.joinToString(", ", "[", "]") { it.render() }
-        is Annotation.Value.Dict -> value.joinToString(", ", "{ ", " }") { "${it.name}: ${it.value.render()}" }
-    }
-
     private fun clearExistingWs(dir: File) {
         dir.walkTopDown()
             .filter { it.isFile && it.extension == "ws" }
@@ -179,29 +135,27 @@ class Emitter {
         fun rewriteContent(content: Endpoint.Content?): Endpoint.Content? =
             content?.copy(reference = rewriteRef(content.reference))
 
+        fun rewriteShape(shape: Shape): Shape = Shape(
+            shape.value.map { entry -> if (entry is Field) entry.copy(reference = rewriteRef(entry.reference)) else entry }
+        )
+
         fun rewrite(def: Definition): Definition = when (def) {
             is Endpoint -> def.copy(
                 path = def.path.map { seg ->
                     if (seg is Endpoint.Segment.Param) seg.copy(reference = rewriteRef(seg.reference)) else seg
                 },
-                queries = def.queries.map { it.copy(reference = rewriteRef(it.reference)) },
-                headers = def.headers.map { it.copy(reference = rewriteRef(it.reference)) },
+                queries = rewriteShape(def.queries),
+                headers = rewriteShape(def.headers),
                 requests = def.requests.map { it.copy(content = rewriteContent(it.content)) },
-                responses = def.responses.map { it.copy(content = rewriteContent(it.content)) },
+                responses = def.responses.map { it.copy(headers = rewriteShape(it.headers), content = rewriteContent(it.content)) },
             )
             is Channel -> def.copy(reference = rewriteRef(def.reference))
             is Rpc -> def.copy(
-                shape = def.shape.copy(
-                    value = def.shape.value.map { it.copy(reference = rewriteRef(it.reference)) }
-                ),
+                shape = rewriteShape(def.shape),
                 result = rewriteRef(def.result),
                 error = def.error?.let(::rewriteRef),
             )
-            is Type -> def.copy(
-                shape = def.shape.copy(
-                    value = def.shape.value.map { it.copy(reference = rewriteRef(it.reference)) }
-                )
-            )
+            is Type -> def.copy(shape = rewriteShape(def.shape))
             else -> def
         }
 

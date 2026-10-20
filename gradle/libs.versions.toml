@@ -4,7 +4,7 @@ maven-api = "3.9.9"
 maven-plugin-tools = "3.13.1"
 maven-plugin-development = "1.0.3"
 gradle-plugin-publish = "1.3.0"
-wirespec = "0.21.1"
+wirespec = "0.22.2"
 classgraph = "4.8.179"
 asm = "9.8"
 spring = "6.1.14"
@@ -45,6 +45,7 @@ asm-tree = { module = "org.ow2.asm:asm-tree", version.ref = "asm" }
 # Wirespec compiler + emitter
 wirespec-core = { module = "community.flock.wirespec.compiler:core-jvm", version.ref = "wirespec" }
 wirespec-emitter = { module = "community.flock.wirespec.compiler.emitters:wirespec-jvm", version.ref = "wirespec" }
+wirespec-converter-graphql = { module = "community.flock.wirespec.converter:graphql-jvm", version.ref = "wirespec" }
 
 # Spring annotations (used by EndpointExtractor at build time)
 spring-web = { module = "org.springframework:spring-web", version.ref = "spring" }
