@@ -45,6 +45,9 @@ abstract class ExtractWirespecTask : DefaultTask() {
     @get:Input @get:Optional
     abstract val extractKtor: Property<Boolean>
 
+    @get:Input @get:Optional
+    abstract val extractGraphQl: Property<Boolean>
+
     @TaskAction
     fun run() {
         try {
@@ -57,6 +60,7 @@ abstract class ExtractWirespecTask : DefaultTask() {
                     extractSpring = extractSpring.getOrElse(true),
                     extractOpenApi = extractOpenApi.getOrElse(true),
                     extractKtor = extractKtor.getOrElse(true),
+                    extractGraphQl = extractGraphQl.getOrElse(true),
                     log = GradleExtractLog(logger),
                 ),
             )

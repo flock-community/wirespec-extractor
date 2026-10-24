@@ -48,6 +48,14 @@ open class TypeExtractor {
     fun extract(type: Type, nullable: Boolean = false): WireType =
         withNullability(extractInner(type, nullable = false), nullable)
 
+    /**
+     * The fields of [cls] as an inline shape, without registering [cls] itself as a
+     * definition — for callers that splice an object's properties into another construct
+     * (a GraphQL `@Arguments` object becomes the argument list of an RPC). Types the
+     * fields reference are registered as usual.
+     */
+    fun fieldsOf(cls: Class<*>): List<WireType.Field> = walkFields(cls)
+
     private fun extractInner(type: Type, nullable: Boolean): WireType = when (type) {
         is Class<*>          -> fromClass(type, nullable)
         is ParameterizedType -> fromParameterized(type, nullable)

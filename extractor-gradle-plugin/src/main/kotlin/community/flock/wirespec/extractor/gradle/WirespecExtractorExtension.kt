@@ -13,6 +13,7 @@ import org.gradle.api.provider.Property
  *     extractSpring.set(true)    // default — Spring MVC, DSL routes, messaging
  *     extractOpenApi.set(true)   // default — JAX-RS + swagger annotations
  *     extractKtor.set(true)      // default — Ktor server routing + client calls
+ *     extractGraphQl.set(true)   // default — Spring for GraphQL operations as RPCs
  *
  *     // Jar packaging — jarEnabled and jarPath belong together:
  *     jarEnabled.set(true)         // default false — bundle .ws files into a jar
@@ -32,6 +33,9 @@ abstract class WirespecExtractorExtension {
 
     /** Extract Ktor server routing trees and Ktor client request calls. Default `true`. */
     abstract val extractKtor: Property<Boolean>
+
+    /** Extract Spring for GraphQL queries, mutations, and subscriptions as Wirespec RPC functions. Default `true`. */
+    abstract val extractGraphQl: Property<Boolean>
 
     /**
      * Bundle the `.ws` files into a `wirespecJar` and add it to Maven publications. Default `false`.

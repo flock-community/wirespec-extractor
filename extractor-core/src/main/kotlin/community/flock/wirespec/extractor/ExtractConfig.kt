@@ -19,6 +19,8 @@ import java.io.File
  *   whose OpenAPI detail is driven by swagger/OpenAPI annotations.
  * @property extractKtor       When `true` (default), extract Ktor server routing
  *   trees and Ktor client request calls.
+ * @property extractGraphQl    When `true` (default), extract Spring for GraphQL
+ *   queries, mutations, and subscriptions as Wirespec RPC functions.
  * @property log               Logger sink. Defaults to [ExtractLog.NoOp].
  */
 data class ExtractConfig(
@@ -29,5 +31,6 @@ data class ExtractConfig(
     val extractSpring: Boolean = true,
     val extractOpenApi: Boolean = true,
     val extractKtor: Boolean = true,
+    val extractGraphQl: Boolean = true,
     val log: ExtractLog = ExtractLog.NoOp,
 )

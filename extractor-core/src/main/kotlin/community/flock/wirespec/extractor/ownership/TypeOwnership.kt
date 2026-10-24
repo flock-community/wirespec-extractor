@@ -1,9 +1,13 @@
 package community.flock.wirespec.extractor.ownership
 
+import community.flock.wirespec.compiler.core.parse.ast.Annotation
 import community.flock.wirespec.compiler.core.parse.ast.Channel as WsChannel
 import community.flock.wirespec.compiler.core.parse.ast.Definition
 import community.flock.wirespec.compiler.core.parse.ast.Endpoint as WsEndpoint
+import community.flock.wirespec.compiler.core.parse.ast.Field
 import community.flock.wirespec.compiler.core.parse.ast.Reference
+import community.flock.wirespec.compiler.core.parse.ast.Rpc as WsRpc
+import community.flock.wirespec.compiler.core.parse.ast.Shape
 import community.flock.wirespec.compiler.core.parse.ast.Type as WsType
 
 /**
@@ -12,7 +16,7 @@ import community.flock.wirespec.compiler.core.parse.ast.Type as WsType
  *
  * A type "belongs" to a controller if it is reachable from any of that
  * controller's endpoint references (path params, queries, headers, request
- * content, response content), transitively through Object/Type field
+ * content, response content), channel payloads, or RPC arguments and results, transitively through Object/Type field
  * references. Enums and Refined definitions are leaves in the reference graph.
  *
  * Definitions reachable from exactly one controller are appended to that
@@ -47,6 +51,11 @@ internal object TypeOwnership {
             }
             defs.filterIsInstance<WsChannel>().forEach { ch ->
                 customNamesIn(ch).forEach { name ->
+                    if (visited.add(name)) frontier += name
+                }
+            }
+            defs.filterIsInstance<WsRpc>().forEach { rpc ->
+                customNamesIn(rpc).forEach { name ->
                     if (visited.add(name)) frontier += name
                 }
             }
@@ -109,12 +118,12 @@ internal object TypeOwnership {
         endpoint.path.forEach { seg ->
             if (seg is WsEndpoint.Segment.Param) out += customNamesIn(seg.reference).toList()
         }
-        endpoint.queries.forEach  { f -> out += customNamesIn(f.reference).toList() }
-        endpoint.headers.forEach  { f -> out += customNamesIn(f.reference).toList() }
+        endpoint.queries.fieldEntries().forEach { f -> out += customNamesIn(f.reference).toList() }
+        endpoint.headers.fieldEntries().forEach { f -> out += customNamesIn(f.reference).toList() }
         endpoint.requests.forEach { r -> r.content?.reference?.let { out += customNamesIn(it).toList() } }
         endpoint.responses.forEach { r ->
             r.content?.reference?.let { out += customNamesIn(it).toList() }
-            r.headers.forEach { h -> out += customNamesIn(h.reference).toList() }
+            r.headers.fieldEntries().forEach { h -> out += customNamesIn(h.reference).toList() }
         }
         return out
     }
@@ -123,11 +132,36 @@ internal object TypeOwnership {
     internal fun customNamesIn(channel: WsChannel): Set<String> =
         customNamesIn(channel.reference).toSet()
 
-    /** Names of every `Reference.Custom` reachable from a Type's shape fields and extends list. */
+    /** Names of every `Reference.Custom` reachable from an RPC's arguments, result, and error. */
+    internal fun customNamesIn(rpc: WsRpc): Set<String> {
+        val out = linkedSetOf<String>()
+        rpc.shape.fieldEntries().forEach { f -> out += customNamesIn(f.reference).toList() }
+        out += customNamesIn(rpc.result).toList()
+        rpc.error?.let { out += customNamesIn(it).toList() }
+        return out
+    }
+
+    /**
+     * Names of every `Reference.Custom` reachable from a Type's shape fields and extends list,
+     * plus the types a GraphQL field argument takes — those are only named in the GraphQL type
+     * of its `@GraphQLArgument(type: …)`, so the input type stays with the type that takes it.
+     */
     internal fun customNamesIn(type: WsType): Set<String> {
         val out = linkedSetOf<String>()
-        type.shape.value.forEach { f -> out += customNamesIn(f.reference).toList() }
+        type.shape.fieldEntries().forEach { f ->
+            out += customNamesIn(f.reference).toList()
+            f.annotations.filter { it.name == GRAPHQL_ARGUMENT }.forEach { argument ->
+                val graphQlType = argument.parameters.firstOrNull { it.name == "type" }?.value as? Annotation.Value.Single
+                graphQlType?.let { out += GRAPHQL_NAME.findAll(it.value).map { m -> m.value } }
+            }
+        }
         type.extends.forEach { ref -> out += customNamesIn(ref).toList() }
         return out
     }
+
+    private const val GRAPHQL_ARGUMENT = "GraphQLArgument"
+    private val GRAPHQL_NAME = Regex("[_A-Za-z][_0-9A-Za-z]*")
+
+    /** The fields of [Shape]; the extractor never spreads parts, so there are no other entries. */
+    private fun Shape.fieldEntries(): List<Field> = value.filterIsInstance<Field>()
 }

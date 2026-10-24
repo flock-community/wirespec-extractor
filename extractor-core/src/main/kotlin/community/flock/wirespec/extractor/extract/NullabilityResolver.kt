@@ -70,6 +70,28 @@ object NullabilityResolver {
     }
 
     /**
+     * Returns true if [method]'s return value should be modelled as nullable — used for
+     * GraphQL operation results, whose schema nullability the extractor cannot see.
+     *
+     * Priority order:
+     *  1. Java primitive type → non-null
+     *  2. Optional<T> → nullable
+     *  3. @Nullable / @NonNull annotations → as declared
+     *  4. Kotlin declared return type → as declared (also for `suspend` functions,
+     *     whose compiled return type is an erased `Object`)
+     *  5. JSpecify @NullMarked scope → non-null
+     *  6. Default → nullable, matching GraphQL's own default
+     */
+    fun isReturnNullable(method: Method): Boolean {
+        if (method.returnType.isPrimitive) return false
+        if (method.returnType == Optional::class.java) return true
+        annotationDeclaredNullable(method)?.let { return it }
+        kotlinReturnNullable(method)?.let { return it }
+        if (isNullMarked(method)) return false
+        return true
+    }
+
+    /**
      * Kotlin-metadata-only view of nullability for a property field: true/false when the
      * declaring class is a Kotlin class carrying a matching property, null when it cannot
      * be determined. Unlike [isNullable] this never falls back to a default, so callers
@@ -118,6 +140,13 @@ object NullabilityResolver {
         if (index < 0) return null
         val kParam = function.valueParameters.getOrNull(index) ?: return null
         return kParam.type.isMarkedNullable
+    }
+
+    /** Read Kotlin's @Metadata for a function's declared return type. Null when this isn't a Kotlin method. */
+    private fun kotlinReturnNullable(method: Method): Boolean? {
+        if (!method.declaringClass.isAnnotationPresent(Metadata::class.java)) return null
+        val function = try { method.kotlinFunction } catch (_: Throwable) { return null } ?: return null
+        return function.returnType.isMarkedNullable
     }
 
     private val NULLABLE_FQNS = setOf(

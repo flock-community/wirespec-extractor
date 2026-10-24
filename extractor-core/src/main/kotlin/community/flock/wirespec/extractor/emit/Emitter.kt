@@ -8,11 +8,12 @@ import community.flock.wirespec.compiler.core.parse.ast.Channel
 import community.flock.wirespec.compiler.core.parse.ast.Definition
 import community.flock.wirespec.compiler.core.parse.ast.DefinitionIdentifier
 import community.flock.wirespec.compiler.core.parse.ast.Endpoint
-import community.flock.wirespec.compiler.core.parse.ast.FieldIdentifier
-import community.flock.wirespec.compiler.core.parse.ast.Identifier
+import community.flock.wirespec.compiler.core.parse.ast.Field
 import community.flock.wirespec.compiler.core.parse.ast.Module
 import community.flock.wirespec.compiler.core.parse.ast.Reference
 import community.flock.wirespec.compiler.core.parse.ast.Root
+import community.flock.wirespec.compiler.core.parse.ast.Rpc
+import community.flock.wirespec.compiler.core.parse.ast.Shape
 import community.flock.wirespec.compiler.core.parse.ast.Type
 import community.flock.wirespec.compiler.utils.Logger
 import community.flock.wirespec.compiler.utils.noLogger
@@ -22,19 +23,11 @@ import java.io.File
 class Emitter {
 
     /**
-     * Custom emitter that also backticks field names starting with `_`.
-     * The upstream [WirespecEmitter] already backticks names that are reserved
-     * keywords or start with an uppercase letter, but Wirespec syntax also
-     * requires underscore-leading field names to be quoted.
+     * Wirespec's own emitter. Since Wirespec 0.22 it renders annotations — the GraphQL
+     * metadata on RPCs and fields — and backticks every field name that isn't a plain
+     * identifier (`_version`, `channel`), so nothing needs overriding.
      */
-    private val emitter = object : WirespecEmitter() {
-        override fun emit(identifier: Identifier): String {
-            if (identifier is FieldIdentifier && identifier.value.startsWith("_")) {
-                return "`${identifier.value}`"
-            }
-            return super.emit(identifier)
-        }
-    }
+    private val emitter = WirespecEmitter()
     private val logger: Logger = noLogger
 
     /**
@@ -114,8 +107,9 @@ class Emitter {
      * that has no fields and rewrite every reference to it into `Unit` — the
      * canonical "no content" reference. This covers all reference sites
      * (channel payloads, endpoint request/response bodies, path params, query
-     * and header fields, and fields of other types), which also guarantees no
-     * dangling reference is left pointing at a definition we removed.
+     * and header fields, RPC arguments and results, and fields of other types),
+     * which also guarantees no dangling reference is left pointing at a
+     * definition we removed.
      *
      * Runs before [deduplicateNames] so the freed type names are reflected in
      * the collision counts.
@@ -141,22 +135,27 @@ class Emitter {
         fun rewriteContent(content: Endpoint.Content?): Endpoint.Content? =
             content?.copy(reference = rewriteRef(content.reference))
 
+        fun rewriteShape(shape: Shape): Shape = Shape(
+            shape.value.map { entry -> if (entry is Field) entry.copy(reference = rewriteRef(entry.reference)) else entry }
+        )
+
         fun rewrite(def: Definition): Definition = when (def) {
             is Endpoint -> def.copy(
                 path = def.path.map { seg ->
                     if (seg is Endpoint.Segment.Param) seg.copy(reference = rewriteRef(seg.reference)) else seg
                 },
-                queries = def.queries.map { it.copy(reference = rewriteRef(it.reference)) },
-                headers = def.headers.map { it.copy(reference = rewriteRef(it.reference)) },
+                queries = rewriteShape(def.queries),
+                headers = rewriteShape(def.headers),
                 requests = def.requests.map { it.copy(content = rewriteContent(it.content)) },
-                responses = def.responses.map { it.copy(content = rewriteContent(it.content)) },
+                responses = def.responses.map { it.copy(headers = rewriteShape(it.headers), content = rewriteContent(it.content)) },
             )
             is Channel -> def.copy(reference = rewriteRef(def.reference))
-            is Type -> def.copy(
-                shape = def.shape.copy(
-                    value = def.shape.value.map { it.copy(reference = rewriteRef(it.reference)) }
-                )
+            is Rpc -> def.copy(
+                shape = rewriteShape(def.shape),
+                result = rewriteRef(def.result),
+                error = def.error?.let(::rewriteRef),
             )
+            is Type -> def.copy(shape = rewriteShape(def.shape))
             else -> def
         }
 
@@ -173,9 +172,9 @@ class Emitter {
      * Ensure every definition is uniquely named across *all* emitted files, not
      * just within one. A name that appears exactly once anywhere stays as-is; a
      * name that appears two or more times (endpoint↔endpoint across files,
-     * endpoint↔channel, endpoint↔type, …) gets a numeric suffix on *every*
-     * occurrence — `Foo1`, `Foo2`, `Foo3` — so no "winner" silently keeps the
-     * bare name.
+     * endpoint↔channel, rpc↔endpoint, endpoint↔type, …) gets a numeric suffix
+     * on *every* occurrence — `Foo1`, `Foo2`, `Foo3` — so no "winner" silently
+     * keeps the bare name.
      *
      * Types are never renamed: they're referenced by name from endpoints,
      * channels, and other types (across files via `types.ws`), and renaming
@@ -183,7 +182,7 @@ class Emitter {
      * when a type and an endpoint/channel share a name, only the
      * endpoint/channel receives a suffix.
      *
-     * Renaming endpoints/channels is safe globally because nothing references
+     * Renaming endpoints/channels/RPCs is safe globally because nothing references
      * them — they are leaves in the reference graph.
      */
     private fun deduplicateNames(
@@ -198,13 +197,13 @@ class Emitter {
         // Reserve every type name first so a suffixed endpoint never collides
         // with a type called `Foo1` either.
         val used = allDefs
-            .filter { it !is Endpoint && it !is Channel }
+            .filterNot { it.isOperation() }
             .mapTo(mutableSetOf()) { it.identifier.value.lowercase() }
 
         fun rename(def: Definition): Definition {
             val name = def.identifier.value
             return when {
-                def !is Endpoint && def !is Channel -> def
+                !def.isOperation() -> def
                 nameCounts.getValue(name.lowercase()) == 1 -> {
                     used.add(name.lowercase())
                     def
@@ -216,6 +215,7 @@ class Emitter {
                     when (def) {
                         is Endpoint -> def.copy(identifier = DefinitionIdentifier(newName))
                         is Channel  -> def.copy(identifier = DefinitionIdentifier(newName))
+                        is Rpc      -> def.copy(identifier = DefinitionIdentifier(newName))
                         else        -> def
                     }
                 }
@@ -232,4 +232,7 @@ class Emitter {
         val dedupedShared = sharedTypes.map(::rename)
         return dedupedControllers to dedupedShared
     }
+
+    /** Endpoints, channels, and RPCs: the renameable leaves of the reference graph. */
+    private fun Definition.isOperation(): Boolean = this is Endpoint || this is Channel || this is Rpc
 }

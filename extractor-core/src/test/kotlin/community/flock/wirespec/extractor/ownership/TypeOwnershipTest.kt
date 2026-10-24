@@ -7,6 +7,7 @@ import community.flock.wirespec.compiler.core.parse.ast.Field as WsField
 import community.flock.wirespec.compiler.core.parse.ast.FieldIdentifier
 import community.flock.wirespec.compiler.core.parse.ast.Reference
 import community.flock.wirespec.compiler.core.parse.ast.Refined as WsRefined
+import community.flock.wirespec.compiler.core.parse.ast.Shape
 import community.flock.wirespec.compiler.core.parse.ast.Type as WsType
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
@@ -278,12 +279,12 @@ private fun endpoint(name: String, responseRef: Reference?): WsEndpoint = WsEndp
     identifier = DefinitionIdentifier(name),
     method = WsEndpoint.Method.GET,
     path = listOf(WsEndpoint.Segment.Literal("p")),
-    queries = emptyList(),
-    headers = emptyList(),
+    queries = Shape(emptyList()),
+    headers = Shape(emptyList()),
     requests = listOf(WsEndpoint.Request(content = null)),
     responses = listOf(WsEndpoint.Response(
         status = "200",
-        headers = emptyList(),
+        headers = Shape(emptyList()),
         content = responseRef?.let { WsEndpoint.Content("application/json", it) },
         annotations = emptyList(),
     )),
@@ -293,7 +294,7 @@ private fun typeDef(name: String, vararg fieldNameToRefName: Pair<String, String
     comment = null,
     annotations = emptyList(),
     identifier = DefinitionIdentifier(name),
-    shape = WsType.Shape(
+    shape = Shape(
         value = fieldNameToRefName.map { (fn, refName) ->
             WsField(
                 annotations = emptyList(),

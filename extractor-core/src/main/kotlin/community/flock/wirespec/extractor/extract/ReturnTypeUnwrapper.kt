@@ -30,10 +30,11 @@ object ReturnTypeUnwrapper {
      * effective response type. Falls through to the [Type] overload for plain
      * non-suspend methods.
      */
-    fun unwrap(method: Method): Unwrapped {
-        val effective = continuationReturnType(method) ?: method.genericReturnType
-        return unwrap(effective)
-    }
+    fun unwrap(method: Method): Unwrapped = unwrap(effectiveReturnType(method))
+
+    /** [method]'s declared return type, or for a `suspend` function the type it resumes with. */
+    fun effectiveReturnType(method: Method): Type =
+        continuationReturnType(method) ?: method.genericReturnType
 
     /**
      * If [method]'s last parameter is `Continuation<? super T>`, return `T`
