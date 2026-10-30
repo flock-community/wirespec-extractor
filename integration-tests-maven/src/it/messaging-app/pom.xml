@@ -8,7 +8,7 @@
 
     <properties>
         <kotlin.version>2.1.20</kotlin.version>
-        <spring.version>6.1.14</spring.version>
+        <spring.version>6.1.20</spring.version>
         <spring-amqp.version>3.1.7</spring-amqp.version>
         <spring-pulsar.version>1.0.8</spring-pulsar.version>
         <spring-integration.version>6.2.7</spring-integration.version>
