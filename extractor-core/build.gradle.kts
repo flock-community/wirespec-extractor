@@ -46,6 +46,9 @@ dependencies {
     // JSpecify nullness annotations — used only by test fixtures that exercise
     // @Nullable / @NonNull (TYPE_USE) and @NullMarked extraction.
     testImplementation(libs.jspecify)
+    // springdoc's @ParameterObject — used only by test fixtures; ParamExtractor
+    // detects the annotation by FQN so the main classpath stays springdoc-free.
+    testImplementation(libs.springdoc.openapi.starter.common)
     testImplementation(libs.spring.webflux)
     testImplementation(libs.spring.webmvc)
     // Spring Kafka is referenced ONLY from test code (real annotations/types
