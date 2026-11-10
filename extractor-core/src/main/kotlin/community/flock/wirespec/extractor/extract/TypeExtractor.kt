@@ -10,6 +10,8 @@ import java.lang.reflect.WildcardType
 import java.util.Optional
 import java.util.UUID
 
+private const val UUID_REGEX = "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+
 private val FRAMEWORK_PACKAGES = listOf(
     "org.springframework",
     "org.springdoc",
@@ -25,7 +27,7 @@ private val FRAMEWORK_PACKAGES = listOf(
  * One TypeExtractor instance is used per scan run so the `definitions` set
  * accumulates across all controllers.
  */
-open class TypeExtractor {
+open class TypeExtractor(private val uuidScalar: Boolean = false) {
 
     private val cache = mutableMapOf<String, WireType>()
     protected val _definitions = linkedSetOf<WireType>()
@@ -105,6 +107,16 @@ open class TypeExtractor {
     private fun nameFor(composed: String, rawClass: Class<*>): String =
         claim(composed, "${rawClass.name}#$composed")
 
+    /**
+     * `UUID` as a named refined string, so GraphQL clients declare variables as the `UUID`
+     * scalar the schema expects rather than `String`.
+     */
+    private fun uuidRef(nullable: Boolean): WireType.Ref {
+        val name = claim("UUID", UUID::class.java.name)
+        _definitions += WireType.Refined(name, WireType.Primitive(WireType.Primitive.Kind.STRING), regex = UUID_REGEX)
+        return WireType.Ref(name, nullable)
+    }
+
     private fun fromClass(cls: Class<*>, nullable: Boolean): WireType {
         if (cls == Any::class.java) return WireType.Any(nullable)
         primitiveOf(cls)?.let { return it.copy(nullable = nullable) }
@@ -114,7 +126,7 @@ open class TypeExtractor {
         // a Collection. Without this, an array class fell through to the object branch, walked
         // zero fields, and the empty-type rewrite collapsed the whole field to Unit.
         if (cls.isArray) return WireType.ListOf(extractInner(cls.componentType, nullable = false), nullable)
-        if (cls == UUID::class.java) return WireType.Primitive(WireType.Primitive.Kind.STRING, nullable)
+        if (cls == UUID::class.java) return if (uuidScalar) uuidRef(nullable) else WireType.Primitive(WireType.Primitive.Kind.STRING, nullable)
         // Raw Optional (no type argument) — an opaque, inherently nullable value.
         if (cls == Optional::class.java) return WireType.Primitive(WireType.Primitive.Kind.STRING, nullable = true)
         if (Enum::class.java.isAssignableFrom(cls)) {

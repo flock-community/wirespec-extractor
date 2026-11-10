@@ -137,7 +137,7 @@ object WirespecExtractor {
                 throw WirespecExtractorException("Controller simple-name collisions: $msg")
             }
 
-            val types = TypeExtractor()
+            val types = TypeExtractor(uuidScalar = graphQlControllers.isNotEmpty())
             val endpoints = EndpointExtractor(types, onWarn = { msg -> config.log.warn(msg) })
             val dslEndpoints = DslEndpointExtractor(types, loader, onWarn = { msg -> config.log.warn(msg) })
             val jaxrsEndpoints = JaxRsEndpointExtractor(types, onWarn = { msg -> config.log.warn(msg) })
