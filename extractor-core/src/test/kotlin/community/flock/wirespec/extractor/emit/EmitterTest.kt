@@ -653,9 +653,9 @@ class EmitterTest {
         )
         val out = File(dir.toFile(), "BookController.ws").readText()
 
-        out shouldContain "@GraphQLQuery\nrpc BookById {\n  id: String,\n  `_version`: Integer32?\n} -> Book?"
-        out shouldContain "@GraphQLSubscription\nrpc AllBooks {} -> Book[]"
-        out shouldContain "@GraphQLMutation\nrpc Reset {} -> Unit"
+        out shouldContain "@GraphQLQuery\n@GraphQLName(\"bookById\")\nrpc BookById {\n  id: String,\n  `_version`: Integer32?\n} -> Book?"
+        out shouldContain "@GraphQLSubscription\n@GraphQLName(\"allBooks\")\nrpc AllBooks {} -> Book[]"
+        out shouldContain "@GraphQLMutation\n@GraphQLName(\"reset\")\nrpc Reset {} -> Unit"
         out shouldContain "@GraphQLQuery\n@GraphQLName(\"book\")\nrpc QueryBook {} -> Book"
 
         val ctx = object : ParseContext {

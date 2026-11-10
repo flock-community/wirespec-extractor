@@ -741,16 +741,19 @@ class BookController {
 
 ```wirespec
 @GraphQLQuery
+@GraphQLName("bookById")
 rpc BookById {
   id: String
 } -> Book?
 
 @GraphQLMutation
+@GraphQLName("addBook")
 rpc AddBook {
   input: BookInput
 } -> Book
 
 @GraphQLSubscription
+@GraphQLName("bookAdded")
 rpc BookAdded {} -> Book
 ```
 
@@ -773,8 +776,8 @@ rpc BookAdded {} -> Book
 - **Names** are the GraphQL field name (the annotation's `name` / `field`, else
   the method name), PascalCased: `bookById` → `BookById`. When that name is
   taken — by a type, as `type Book` takes it for a field `book`, or by an earlier
-  rpc — the root type becomes a prefix (`QueryBook`), and `@GraphQLName("book")`
-  keeps the field name.
+  rpc — the root type becomes a prefix (`QueryBook`). `@GraphQLName("book")`
+  is always written, so the original field name is never lost.
 - **Arguments** come from `@Argument` parameters (name from the annotation, else
   the parameter name). An `ArgumentValue<T>` argument becomes a nullable `T`. An
   `@Arguments` object is spread into the argument list, field by field, without a
