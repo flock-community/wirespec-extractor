@@ -161,6 +161,20 @@ class TypeExtractorTest {
         val totalBudget: Double get() = wallet.budget.toDouble()
     }
 
+    class WildcardGetters(val name: String) {
+        val type: Class<*> get() = String::class.java
+        val extras: Map<String, *> get() = emptyMap<String, Any>()
+        val label: String get() = name
+    }
+
+    @Test
+    fun `getter-backed properties with wildcard types are skipped`() {
+        val fresh = TypeExtractor()
+        fresh.extract(WildcardGetters::class.java)
+        val obj = fresh.definitions.filterIsInstance<WireType.Object>().single { it.name == "WildcardGetters" }
+        obj.fields.map { it.name } shouldBe listOf("name", "label")
+    }
+
     @Test
     fun `getter-backed properties declared in the class body are included`() {
         val fresh = TypeExtractor()
