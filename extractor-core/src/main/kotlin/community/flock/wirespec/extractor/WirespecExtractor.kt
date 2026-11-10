@@ -17,6 +17,7 @@ import community.flock.wirespec.extractor.extract.graphql.GraphQlInputs
 import community.flock.wirespec.extractor.extract.graphql.GraphQlRpcExtractor
 import community.flock.wirespec.extractor.extract.graphql.GraphQlRpcNaming
 import community.flock.wirespec.extractor.extract.graphql.GraphQlScanner
+import community.flock.wirespec.extractor.extract.graphql.GraphQlSchemaIds
 import community.flock.wirespec.extractor.extract.jaxrs.JaxRsEndpointExtractor
 import community.flock.wirespec.extractor.extract.ktor.KtorClientExtractor
 import community.flock.wirespec.extractor.extract.ktor.KtorClientScanner
@@ -225,6 +226,13 @@ object WirespecExtractor {
             }
 
             // -- GraphQL operations (Spring for GraphQL @QueryMapping/@MutationMapping/…) ----
+            // The schema files say which strings are really GraphQL `ID`s; the JVM types can't.
+            val schemaIds = if (graphQlControllers.isEmpty()) GraphQlSchemaIds.NONE else GraphQlSchemaIds.load(
+                loader,
+                claimIdName = types::claimGraphQlIdName,
+                onInfo = { msg -> config.log.info(msg) },
+                onWarn = { msg -> config.log.warn(msg) },
+            )
             // Extracted here, named and added once every type is known (see below).
             val extractedRpcs = linkNamespaces(graphQlControllers.flatMap { controller ->
                 try {
@@ -236,6 +244,7 @@ object WirespecExtractor {
                     emptyList()
                 }
             }, emptyTypes = { types.definitions.filterIsInstance<WireType.Object>().filter { it.fields.isEmpty() }.mapTo(mutableSetOf()) { it.name } })
+                .map(schemaIds::rpc)
             val extractedGraphQlFields = graphQlControllers.flatMap { controller ->
                 try {
                     graphQlRpcs.extractFields(controller)
@@ -245,7 +254,7 @@ object WirespecExtractor {
                     config.log.warn("Skipping GraphQL fields from ${controller.name}: ${t.message}")
                     emptyList()
                 }
-            }
+            }.map(schemaIds::field)
 
             // -- Messaging channels (Kafka, JMS, Rabbit, Pulsar, Spring Integration) ----
             val messagingExtractor = MessagingChannelExtractor(types, onWarn = { msg -> config.log.warn(msg) })
@@ -281,7 +290,10 @@ object WirespecExtractor {
                 }
             }
 
-            val extractedTypes = types.definitions.mapNotNull { def ->
+            val typeDefinitions = types.definitions.map(schemaIds::definition).let { defs ->
+                defs + listOfNotNull(schemaIds.idDefinition)
+            }
+            val extractedTypes = typeDefinitions.mapNotNull { def ->
                 try {
                     builder.toDefinition(def)
                 } catch (e: WirespecExtractorException) {
@@ -294,7 +306,7 @@ object WirespecExtractor {
             // Input objects are told apart the way Wirespec's GraphQL converter does: a type an
             // argument reaches is an input, and one that is only ever taken is marked @GraphQLInput.
             val graphQlInputs = GraphQlInputs.of(
-                objects = types.definitions.filterIsInstance<WireType.Object>().associate { o -> o.name to o.fields.map { it.type } },
+                objects = typeDefinitions.filterIsInstance<WireType.Object>().associate { o -> o.name to o.fields.map { it.type } },
                 rpcs = extractedRpcs,
                 fields = extractedGraphQlFields,
             )

@@ -1,0 +1,21 @@
+# The schema DGS codegen generates the types in fixtures/graphqlids from.
+type Query {
+    author(id: ID!): Author
+    authors(ids: [ID!]!): [Author!]!
+    authorByName(name: String!): Author
+}
+
+type Mutation {
+    addAuthor(input: AuthorInput!): ID!
+}
+
+type Author {
+    id: ID!
+    legacyId: ID
+    name: String!
+}
+
+input AuthorInput {
+    name: String!
+    mentorId: ID
+}

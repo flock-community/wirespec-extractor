@@ -107,6 +107,9 @@ open class TypeExtractor(private val uuidScalar: Boolean = false) {
     private fun nameFor(composed: String, rawClass: Class<*>): String =
         claim(composed, "${rawClass.name}#$composed")
 
+    /** Claims the name of GraphQL's built-in `ID` scalar, so no extracted type can take it. */
+    fun claimGraphQlIdName(): String = claim("ID", "graphql:ID")
+
     /**
      * `UUID` as a named refined string, so GraphQL clients declare variables as the `UUID`
      * scalar the schema expects rather than `String`.

@@ -1,0 +1,35 @@
+# Read by the extractor to tell GraphQL `ID`s apart from plain strings.
+type Query {
+    bookById(id: ID!): Book
+    books(genre: Genre): [Book!]!
+    book(id: ID!): Book
+}
+
+type Mutation {
+    addBook(input: BookInput!): Book!
+}
+
+type Subscription {
+    bookAdded: Book!
+}
+
+type Book {
+    id: ID!
+    title: String!
+    genre: Genre!
+    author: Author!
+}
+
+type Author {
+    name: String!
+}
+
+input BookInput {
+    title: String!
+    genre: Genre!
+}
+
+enum Genre {
+    FICTION
+    SCIENCE
+}
