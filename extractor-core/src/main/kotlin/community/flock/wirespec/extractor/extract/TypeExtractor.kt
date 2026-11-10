@@ -443,18 +443,12 @@ open class TypeExtractor {
                         field ?: level.accessorFor(name) ?: level
                     if (JacksonNames.isIgnored(element)) continue
 
-                    val declaredClass = (type as? Class<*>) ?: ((type as? ParameterizedType)?.rawType as? Class<*>) ?: Any::class.java
-                    val nullable = NullabilityResolver.isNullable(element, declaredClass)
-
-                    val rawType = withNullability(extractInner(type, nullable = false), nullable)
-                    val refined = ValidationConstraints.refine(element, rawType)
-                    if (refined is WireType.Refined) _definitions += refined
-
-                    out += WireType.Field(
-                        name = JacksonNames.effectiveName(element, original = name),
-                        type = if (refined is WireType.Refined) WireType.Ref(refined.name, nullable) else refined,
-                        description = NullabilityResolver.schemaDescription(element),
-                    )
+                    // Getter-backed properties are best-effort: one whose type cannot be
+                    // flattened (a wildcard, say) is skipped rather than failing the extraction.
+                    val field0 = if (name in computedNames(level)) {
+                        try { fieldFor(element, name, type) } catch (_: WirespecExtractorException) { null }
+                    } else fieldFor(element, name, type)
+                    if (field0 != null) out += field0
                 }
             }
         } finally {
@@ -463,6 +457,24 @@ open class TypeExtractor {
 
         return out
     }
+
+    private fun fieldFor(element: java.lang.reflect.AnnotatedElement, name: String, type: Type): WireType.Field {
+        val declaredClass = (type as? Class<*>) ?: ((type as? ParameterizedType)?.rawType as? Class<*>) ?: Any::class.java
+        val nullable = NullabilityResolver.isNullable(element, declaredClass)
+
+        val rawType = withNullability(extractInner(type, nullable = false), nullable)
+        val refined = ValidationConstraints.refine(element, rawType)
+        if (refined is WireType.Refined) _definitions += refined
+
+        return WireType.Field(
+            name = JacksonNames.effectiveName(element, original = name),
+            type = if (refined is WireType.Refined) WireType.Ref(refined.name, nullable) else refined,
+            description = NullabilityResolver.schemaDescription(element),
+        )
+    }
+
+    private fun computedNames(cls: Class<*>): Set<String> =
+        if (cls.isRecord) emptySet() else computedMembers(cls).map { it.first }.toSet()
 
     /**
      * Stamp [nullable] onto [t]. Nullability inherent to the type itself — `Optional<T>`,
@@ -501,6 +513,21 @@ open class TypeExtractor {
     private fun Class<*>.isFrameworkClass(): Boolean =
         FRAMEWORK_PACKAGES.any { packageName == it || packageName.startsWith("$it.") }
 
+    private fun fieldMembers(cls: Class<*>): List<Pair<String, Type>> {
+        // Kotlin data classes / POJOs: prefer declared non-static, non-synthetic fields.
+        return cls.declaredFields
+            .filter { !java.lang.reflect.Modifier.isStatic(it.modifiers) && !it.isSynthetic }
+            .mapNotNull { field ->
+                // A delegated property (`val rate by lazy { … }`) stores its delegate, not its
+                // value: the field is `rate$delegate: kotlin.Lazy`. Take the wire type from the
+                // accessor — that is what Jackson serializes — and drop the property when there
+                // is no public accessor to read it from.
+                val delegated = KotlinNames.delegatedPropertyName(field.name)
+                    ?: return@mapNotNull field.name to field.genericType
+                cls.accessorFor(delegated)?.let { delegated to it.genericReturnType }
+            }
+    }
+
     /**
      * Discover (name, generic-type) pairs for a class:
      * 1. Java records: record components.
@@ -512,19 +539,8 @@ open class TypeExtractor {
         if (cls.isRecord) {
             return cls.recordComponents.map { it.name to it.genericType }
         }
-        // Kotlin data classes / POJOs: prefer declared non-static, non-synthetic fields.
-        val declared = cls.declaredFields
-            .filter { !java.lang.reflect.Modifier.isStatic(it.modifiers) && !it.isSynthetic }
-            .mapNotNull { field ->
-                // A delegated property (`val rate by lazy { … }`) stores its delegate, not its
-                // value: the field is `rate$delegate: kotlin.Lazy`. Take the wire type from the
-                // accessor — that is what Jackson serializes — and drop the property when there
-                // is no public accessor to read it from.
-                val delegated = KotlinNames.delegatedPropertyName(field.name)
-                    ?: return@mapNotNull field.name to field.genericType
-                cls.accessorFor(delegated)?.let { delegated to it.genericReturnType }
-            }
-        if (declared.isNotEmpty()) return declared + computedProperties(cls, declared.map { it.first }.toSet())
+        val declared = fieldMembers(cls)
+        if (declared.isNotEmpty()) return declared + computedMembers(cls, declared)
         // Pure JavaBean: getXxx / isXxx pairs.
         return cls.methods
             .filter { it.parameterCount == 0 && (it.name.startsWith("get") || it.name.startsWith("is")) && it.declaringClass != Any::class.java }
@@ -535,6 +551,12 @@ open class TypeExtractor {
                 name to method.genericReturnType
             }
     }
+
+    private fun computedMembers(cls: Class<*>): List<Pair<String, Type>> =
+        computedMembers(cls, fieldMembers(cls))
+
+    private fun computedMembers(cls: Class<*>, declared: List<Pair<String, Type>>): List<Pair<String, Type>> =
+        if (declared.isEmpty()) emptyList() else computedProperties(cls, declared.map { it.first }.toSet())
 
     /**
      * Getter-backed properties declared in the class body (`val id: UUID get() = wallet.id`):
