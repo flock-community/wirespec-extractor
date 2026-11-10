@@ -154,6 +154,21 @@ class TypeExtractorTest {
 
     data class SelfRef(val next: SelfRef?)
 
+    class Wallet(val id: String, val budget: Int)
+
+    class CampaignNode(val wallet: Wallet) {
+        val id: String get() = wallet.id
+        val totalBudget: Double get() = wallet.budget.toDouble()
+    }
+
+    @Test
+    fun `getter-backed properties declared in the class body are included`() {
+        val fresh = TypeExtractor()
+        fresh.extract(CampaignNode::class.java)
+        val obj = fresh.definitions.filterIsInstance<WireType.Object>().single { it.name == "CampaignNode" }
+        obj.fields.map { it.name } shouldBe listOf("wallet", "id", "totalBudget")
+    }
+
     @Test
     fun `walkFields honors @JsonProperty and @JsonIgnore`() {
         extractor.extract(community.flock.wirespec.extractor.fixtures.dto.JacksonDto::class.java)

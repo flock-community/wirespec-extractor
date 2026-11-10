@@ -524,7 +524,7 @@ open class TypeExtractor {
                     ?: return@mapNotNull field.name to field.genericType
                 cls.accessorFor(delegated)?.let { delegated to it.genericReturnType }
             }
-        if (declared.isNotEmpty()) return declared
+        if (declared.isNotEmpty()) return declared + computedProperties(cls, declared.map { it.first }.toSet())
         // Pure JavaBean: getXxx / isXxx pairs.
         return cls.methods
             .filter { it.parameterCount == 0 && (it.name.startsWith("get") || it.name.startsWith("is")) && it.declaringClass != Any::class.java }
@@ -535,6 +535,28 @@ open class TypeExtractor {
                 name to method.genericReturnType
             }
     }
+
+    /**
+     * Getter-backed properties declared in the class body (`val id: UUID get() = wallet.id`):
+     * public accessors with no backing field and no matching entry in [known]. Jackson and
+     * Spring GraphQL both expose these, so they belong in the wire shape.
+     */
+    private fun computedProperties(cls: Class<*>, known: Set<String>): List<Pair<String, Type>> =
+        cls.declaredMethods
+            .filter {
+                it.parameterCount == 0
+                    && !it.isSynthetic && !it.isBridge
+                    && !java.lang.reflect.Modifier.isStatic(it.modifiers)
+                    && java.lang.reflect.Modifier.isPublic(it.modifiers)
+                    && it.returnType != Void.TYPE
+            }
+            .mapNotNull { method ->
+                val names = KotlinNames.accessorPropertyNames(method.name)
+                if (names.isEmpty() || names.any { it in known }) null
+                else names.first() to method.genericReturnType
+            }
+            .distinctBy { it.first }
+            .sortedBy { it.first }
 
     /**
      * Whether [cls] is a JDK / platform value type that should be treated as an
