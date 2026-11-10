@@ -36,6 +36,9 @@ class BookController {
     fun book(@Argument id: String): Book? = null
 
     @QueryMapping
+    fun bookByUuid(@Argument uuid: java.util.UUID): Book? = null
+
+    @QueryMapping
     fun books(@Argument genre: Genre?): List<Book> = emptyList()
 
     /** Field name from the annotation; arguments bound as one object. */

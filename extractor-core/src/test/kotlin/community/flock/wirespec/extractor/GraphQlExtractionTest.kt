@@ -55,7 +55,7 @@ class GraphQlExtractionTest {
         ws shouldContain "} -> Book[]"
         // `book` is taken by `type Book`, so the rpc takes the root type as prefix.
         ws shouldContain "@GraphQLQuery\n@GraphQLName(\"book\")\nrpc QueryBook {\n  id: String\n} -> Book?"
-        ws.split("rpc ").size - 1 shouldBe 10
+        ws.split("rpc ").size - 1 shouldBe 11
         ws shouldNotContain "endpoint "
 
         // Types reached from arguments and results live with the controller.
@@ -88,6 +88,13 @@ class GraphQlExtractionTest {
 
         // The annotated output parses back with Wirespec.
         parse(files).isRight() shouldBe true
+    }
+
+    @Test
+    fun `UUID arguments are the UUID scalar`(@TempDir tmp: Path) {
+        val files = extract(tmp)
+        files.single { it.name == "BookController.ws" }.readText() shouldContain "uuid: UUID"
+        GraphQLEmitter.emit(parse(files).getOrNull()!!, noLogger).head.result shouldContain "bookByUuid(\n    uuid: UUID!\n  )"
     }
 
     @Test

@@ -27,7 +27,7 @@ class GraphQlRpcExtractorTest {
     @Test
     fun `discovers queries mutations and subscriptions as root operations`() {
         rpcs.keys shouldContainExactlyInAnyOrder listOf(
-            "BookById", "Book", "Books", "SearchBooks", "BookCount", "LatestBook",
+            "BookById", "BookByUuid", "Book", "Books", "SearchBooks", "BookCount", "LatestBook",
             "AddBook", "DeleteBook", "RenameBook",
             "BookAdded",
         )
