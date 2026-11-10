@@ -59,11 +59,11 @@ class WirespecAstBuilder {
     /**
      * An RPC, annotated the way Wirespec's GraphQL converter (wirespec PR #710) does: with its
      * operation type — `@GraphQLQuery`, `@GraphQLMutation`, or `@GraphQLSubscription` — and with
-     * `@GraphQLName` when the field name can't be read back from the RPC name.
+     * `@GraphQLName` always, so the original field name is never lost.
      */
     fun toRpc(r: Rpc): WsRpc = WsRpc(
         comment = null,
-        annotations = listOfNotNull(
+        annotations = listOf(
             Annotation(
                 "GraphQL${r.kind.typeName}",
                 listOfNotNull(
@@ -71,8 +71,7 @@ class WirespecAstBuilder {
                         .takeIf { r.rootTypeName != r.kind.typeName },
                 ),
             ),
-            Annotation("GraphQLName", listOf(Annotation.Parameter("default", Annotation.Value.Single(r.field))))
-                .takeIf { r.name.replaceFirstChar(Char::lowercase) != r.field },
+            Annotation("GraphQLName", listOf(Annotation.Parameter("default", Annotation.Value.Single(r.field)))),
         ),
         identifier = DefinitionIdentifier(r.name),
         shape = Shape(r.arguments.map { it.toField() }),

@@ -20,10 +20,10 @@ object GraphQlFixtureVerifier {
         wsDir.listFiles()!!.map { it.name }.sorted() shouldContainExactly listOf("BookController.ws")
 
         val ws = File(wsDir, "BookController.ws").readText()
-        ws shouldContain "@GraphQLQuery\nrpc BookById {\n  id: String\n} -> Book?"
-        ws shouldContain "@GraphQLQuery\nrpc Books {\n  genre: Genre?\n} -> Book[]"
-        ws shouldContain "@GraphQLMutation\nrpc AddBook {\n  input: BookInput\n} -> Book"
-        ws shouldContain "@GraphQLSubscription\nrpc BookAdded {} -> Book"
+        ws shouldContain "@GraphQLQuery\n@GraphQLName(\"bookById\")\nrpc BookById {\n  id: String\n} -> Book?"
+        ws shouldContain "@GraphQLQuery\n@GraphQLName(\"books\")\nrpc Books {\n  genre: Genre?\n} -> Book[]"
+        ws shouldContain "@GraphQLMutation\n@GraphQLName(\"addBook\")\nrpc AddBook {\n  input: BookInput\n} -> Book"
+        ws shouldContain "@GraphQLSubscription\n@GraphQLName(\"bookAdded\")\nrpc BookAdded {} -> Book"
         // `book` is taken by `type Book`: prefixed with the root type, field name kept.
         ws shouldContain "@GraphQLQuery\n@GraphQLName(\"book\")\nrpc QueryBook {\n  id: String\n} -> Book?"
         ws shouldContain "\ntype Book {"

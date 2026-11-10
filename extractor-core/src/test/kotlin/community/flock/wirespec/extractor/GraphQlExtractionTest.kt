@@ -40,17 +40,18 @@ class GraphQlExtractionTest {
 
         val ws = files.single { it.name == "BookController.ws" }.readText()
         // Annotated as Wirespec's GraphQL converter does: operation type, and @GraphQLName
-        // where the field name can't be read back from the rpc name.
+        // always, so the original field name is never lost.
         ws shouldContain """
             |@GraphQLQuery
+            |@GraphQLName("bookById")
             |rpc BookById {
             |  id: String
             |} -> Book?
         """.trimMargin()
-        ws shouldContain "@GraphQLQuery\nrpc BookCount {} -> Integer32"
-        ws shouldContain "@GraphQLMutation\nrpc DeleteBook {\n  bookId: String\n} -> Unit"
-        ws shouldContain "@GraphQLSubscription\nrpc BookAdded {\n  genre: Genre?\n} -> Book"
-        ws shouldContain "@GraphQLQuery\nrpc SearchBooks {"
+        ws shouldContain "@GraphQLQuery\n@GraphQLName(\"bookCount\")\nrpc BookCount {} -> Integer32"
+        ws shouldContain "@GraphQLMutation\n@GraphQLName(\"deleteBook\")\nrpc DeleteBook {\n  bookId: String\n} -> Unit"
+        ws shouldContain "@GraphQLSubscription\n@GraphQLName(\"bookAdded\")\nrpc BookAdded {\n  genre: Genre?\n} -> Book"
+        ws shouldContain "@GraphQLQuery\n@GraphQLName(\"searchBooks\")\nrpc SearchBooks {"
         ws shouldContain "} -> Book[]"
         // `book` is taken by `type Book`, so the rpc takes the root type as prefix.
         ws shouldContain "@GraphQLQuery\n@GraphQLName(\"book\")\nrpc QueryBook {\n  id: String\n} -> Book?"
@@ -67,16 +68,17 @@ class GraphQlExtractionTest {
         ws shouldContain "type Author {"
 
         files.single { it.name == "LibraryAdminController.ws" }.readText() shouldContain
-            "@GraphQLMutation\nrpc ResetLibrary {} -> Boolean"
+            "@GraphQLMutation\n@GraphQLName(\"resetLibrary\")\nrpc ResetLibrary {} -> Boolean"
 
         files.single { it.name == "LibraryNamespaceController.ws" }.readText().let { namespace ->
-            namespace shouldContain "@GraphQLQuery\nrpc Library {} -> LibraryQuery"
+            namespace shouldContain "@GraphQLQuery\n@GraphQLName(\"library\")\nrpc Library {} -> LibraryQuery"
             namespace shouldContain "rpc Library {} -> LibraryQuery\n\ntype LibraryQuery {\n\n}"
         }
 
         files.single { it.name == "LibraryNamespaceFieldsController.ws" }.readText().let { namespace ->
             namespace shouldContain """
                 |@GraphQLQuery("LibraryQuery")
+                |@GraphQLName("catalog")
                 |rpc Catalog {
                 |  genre: String?
                 |} -> LibraryBook[]
@@ -145,7 +147,7 @@ class GraphQlExtractionTest {
     fun `a controller with both REST endpoints and GraphQL operations gets both in one file`(@TempDir tmp: Path) {
         val ws = extract(tmp).single { it.name == "MixedLibraryController.ws" }.readText()
         ws shouldContain "endpoint RestCount GET /books/count"
-        ws shouldContain "@GraphQLQuery\nrpc ShelfCount {} -> Integer32"
+        ws shouldContain "@GraphQLQuery\n@GraphQLName(\"shelfCount\")\nrpc ShelfCount {} -> Integer32"
     }
 
     @Test
