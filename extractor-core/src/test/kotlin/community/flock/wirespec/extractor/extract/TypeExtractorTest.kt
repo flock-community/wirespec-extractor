@@ -172,7 +172,7 @@ class TypeExtractorTest {
         val fresh = TypeExtractor()
         fresh.extract(WildcardGetters::class.java)
         val obj = fresh.definitions.filterIsInstance<WireType.Object>().single { it.name == "WildcardGetters" }
-        obj.fields.map { it.name } shouldBe listOf("name", "label")
+        obj.fields.map { it.name } shouldBe listOf("name", "extras", "label")
     }
 
     @Test
