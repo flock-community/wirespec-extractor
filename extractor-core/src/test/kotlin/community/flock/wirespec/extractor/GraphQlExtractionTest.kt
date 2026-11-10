@@ -70,8 +70,8 @@ class GraphQlExtractionTest {
             "@GraphQLMutation\nrpc ResetLibrary {} -> Boolean"
 
         files.single { it.name == "LibraryNamespaceController.ws" }.readText().let { namespace ->
-            namespace shouldContain "@GraphQLQuery\nrpc Library {} -> Unit"
-            namespace shouldNotContain "type LibraryQuery"
+            namespace shouldContain "@GraphQLQuery\nrpc Library {} -> LibraryQuery"
+            namespace shouldContain "rpc Library {} -> LibraryQuery\n\ntype LibraryQuery {\n\n}"
         }
 
         files.single { it.name == "LibraryNamespaceFieldsController.ws" }.readText().let { namespace ->

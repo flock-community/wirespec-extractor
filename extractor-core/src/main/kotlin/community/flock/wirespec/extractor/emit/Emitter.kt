@@ -4,6 +4,7 @@ package community.flock.wirespec.extractor.emit
 import arrow.core.NonEmptyList
 import arrow.core.toNonEmptyListOrNull
 import community.flock.wirespec.compiler.core.FileUri
+import community.flock.wirespec.compiler.core.parse.ast.Annotation
 import community.flock.wirespec.compiler.core.parse.ast.Channel
 import community.flock.wirespec.compiler.core.parse.ast.Definition
 import community.flock.wirespec.compiler.core.parse.ast.DefinitionIdentifier
@@ -118,9 +119,18 @@ class Emitter {
         controllerDefinitions: Map<String, List<Definition>>,
         sharedTypes: List<Definition>,
     ): Pair<Map<String, List<Definition>>, List<Definition>> {
-        val emptyTypeNames = (controllerDefinitions.values.flatten() + sharedTypes)
+        val allDefinitions = controllerDefinitions.values.flatten() + sharedTypes
+        // A GraphQL namespace (`type LibraryQuery {}`) is empty by design: its fields are the
+        // rpcs annotated with it, and the schema needs the type to reach them from the root.
+        val graphQlParents = allDefinitions.filterIsInstance<Rpc>()
+            .flatMap { it.annotations }
+            .filter { it.name.startsWith("GraphQL") }
+            .flatMap { it.parameters }
+            .mapNotNull { ((it.value as? Annotation.Value.Single)?.value) }
+            .toSet()
+        val emptyTypeNames = allDefinitions
             .filterIsInstance<Type>()
-            .filter { it.shape.value.isEmpty() && it.extends.isEmpty() }
+            .filter { it.shape.value.isEmpty() && it.extends.isEmpty() && it.identifier.value !in graphQlParents }
             .mapTo(mutableSetOf()) { it.identifier.value }
 
         if (emptyTypeNames.isEmpty()) return controllerDefinitions to sharedTypes
