@@ -21,10 +21,19 @@ class ApiResponseExtractor(
     private val onWarn: (String) -> Unit = {},
 ) {
 
-    fun extract(method: Method, unwrapped: ReturnTypeUnwrapper.Unwrapped): List<Endpoint.Response> {
+    /**
+     * @param natural overrides the response derived from the method signature — the one
+     *                used when no `@ApiResponse` is declared, and whose body backs a
+     *                declared response of the same status that has no content of its own.
+     */
+    fun extract(
+        method: Method,
+        unwrapped: ReturnTypeUnwrapper.Unwrapped,
+        natural: Endpoint.Response? = null,
+    ): List<Endpoint.Response> {
         val declared = collectApiResponses(method)
-        val naturalStatus = ReturnTypeUnwrapper.statusCodeFor(method, unwrapped)
-        val naturalBody = methodBody(unwrapped)
+        val naturalStatus = natural?.statusCode ?: ReturnTypeUnwrapper.statusCodeFor(method, unwrapped)
+        val naturalBody = if (natural != null) natural.body else methodBody(unwrapped)
 
         if (declared.isEmpty()) {
             return listOf(Endpoint.Response(naturalStatus, naturalBody))
@@ -63,7 +72,8 @@ class ApiResponseExtractor(
         return merged
     }
 
-    private fun methodBody(unwrapped: ReturnTypeUnwrapper.Unwrapped): WireType? {
+    /** The response body the method signature declares, or null for a void method. */
+    fun methodBody(unwrapped: ReturnTypeUnwrapper.Unwrapped): WireType? {
         if (unwrapped.isVoid) return null
         val raw = types.extract(unwrapped.type)
         return if (unwrapped.isList) WireType.ListOf(raw) else raw

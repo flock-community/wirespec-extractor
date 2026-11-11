@@ -113,6 +113,8 @@ class FixtureBuildTest {
             "dsl-webflux-app"  -> DslFixtureVerifiers.verifyWebFluxApp(File(workDir, "target/wirespec"))
             "dsl-mvc-app"      -> DslFixtureVerifiers.verifyMvcApp(File(workDir, "target/wirespec"))
             "dsl-java-app"     -> DslFixtureVerifiers.verifyJavaApp(File(workDir, "target/wirespec"))
+            "jaxrs-java-app"   -> verifyJaxRsJavaApp(workDir)
+            "quarkus-java-app" -> verifyQuarkusJavaApp(workDir)
             "graphql-app"      -> GraphQlFixtureVerifier.verify(File(workDir, "target/wirespec"))
             "kafka-app"        -> KafkaFixtureVerifier.verify(File(workDir, "target/wirespec"))
             "messaging-app"    -> MessagingFixtureVerifier.verify(File(workDir, "target/wirespec"))
@@ -271,6 +273,59 @@ class FixtureBuildTest {
                 "basic-kotlin-app/UserController.ws",
                 "basic-kotlin-app/types.ws",
             )
+        }
+    }
+
+    /** Plain `jakarta.ws.rs` resource (no Spring, no swagger) with a single `GET /yolo` endpoint. */
+    private fun verifyJaxRsJavaApp(workDir: File) {
+        val wsDir = File(workDir, "target/wirespec")
+        assertTrue(wsDir.isDirectory) { "wirespec output dir missing at ${wsDir.absolutePath}" }
+
+        val files = wsDir.listFiles()!!.map { it.name }.sorted()
+        files.shouldContainExactly("YoloResource.ws")
+
+        val resource = File(wsDir, "YoloResource.ws").readText()
+        resource shouldMatch Regex("(?s).*endpoint Yolo GET /yolo\\s*->\\s*\\{\\s*200 -> String\\s*}.*")
+    }
+
+    /**
+     * A real Quarkus build (`quarkus-maven-plugin` + `quarkus-rest-jackson`) whose resources use
+     * the Quarkus REST idioms: `@Rest*` shorthands, bare path parameters, Mutiny, `RestResponse`.
+     */
+    private fun verifyQuarkusJavaApp(workDir: File) {
+        val wsDir = File(workDir, "target/wirespec")
+        assertTrue(wsDir.isDirectory) { "wirespec output dir missing at ${wsDir.absolutePath}" }
+
+        val files = wsDir.listFiles()!!.map { it.name }.sorted()
+        files.shouldContainExactly("BasketResource.ws", "FruitResource.ws", "types.ws")
+
+        fun endpoint(signature: String, response: String) =
+            Regex("(?s).*" + Regex.escape("endpoint $signature -> {") + "\\s*" + Regex.escape(response) + "\\s*}.*")
+
+        val fruits = File(wsDir, "FruitResource.ws").readText()
+        // @RestQuery / an unnamed @RestHeader are parameters, not a request body.
+        fruits shouldMatch endpoint("List GET /fruits ?{filter: String?} #{`X-Trace-Id`: String?}", "200 -> Fruit[]")
+        // @RestPath binds the path variable; Uni<T> is unwrapped.
+        fruits shouldMatch endpoint("ByName GET /fruits/{name: String}", "200 -> Fruit")
+        // A bare parameter named after a path variable is a path parameter.
+        fruits shouldMatch endpoint("Description GET /fruits/{name: String}/description", "200 -> String")
+        fruits shouldMatch endpoint("Stream GET /fruits/stream", "200 -> Fruit[]")
+        // RestResponse<T> is unwrapped and @ResponseStatus sets the status.
+        fruits shouldMatch endpoint("Create POST Fruit /fruits", "201 -> Fruit")
+        fruits shouldMatch endpoint("Update PUT Fruit /fruits/{name: String}", "200 -> Fruit")
+        // An untyped Response carries no body type.
+        fruits shouldMatch endpoint("Delete DELETE /fruits/{name: String}", "200 -> Unit")
+
+        // Routing annotations inherited from the interface the resource implements.
+        val baskets = File(wsDir, "BasketResource.ws").readText()
+        baskets shouldMatch endpoint("Basket GET /baskets/{id: String}", "200 -> Fruit")
+
+        val combined = fruits + "\n" + baskets + "\n" + File(wsDir, "types.ws").readText()
+        assertTrue(Regex("(?m)^type Fruit \\{").containsMatchIn(combined)) { "Fruit type missing:\n$combined" }
+        listOf("Uni", "Multi", "RestResponse", "Response").forEach { wrapper ->
+            assertTrue(!Regex("(?m)^type \\w*$wrapper\\b").containsMatchIn(combined)) {
+                "Framework wrapper $wrapper leaked into a .ws file:\n$combined"
+            }
         }
     }
 

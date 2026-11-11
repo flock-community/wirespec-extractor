@@ -179,7 +179,7 @@ object WirespecExtractor {
             // -- JAX-RS resources (routing from @Path/@GET/…, OpenAPI detail from swagger) ----
             for (resource in jaxrsResources) {
                 val eps = try {
-                    jaxrsEndpoints.extract(resource).map(builder::toEndpoint)
+                    jaxrsEndpoints.extract(resource, jaxrsResources).map(builder::toEndpoint)
                 } catch (e: WirespecExtractorException) {
                     throw e
                 } catch (t: Throwable) {

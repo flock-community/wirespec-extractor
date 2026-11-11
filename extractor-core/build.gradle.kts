@@ -68,6 +68,10 @@ dependencies {
     // legacy javax.ws.rs namespaces), so extraction cleanly no-ops in projects
     // that don't use JAX-RS.
     testImplementation(libs.jakarta.ws.rs.api)
+    // Quarkus REST (RESTEasy Reactive) annotations and Mutiny reactive types, for the
+    // Quarkus resource fixtures. Test-only for the same reason: they are read by FQN.
+    testImplementation(libs.resteasy.reactive.common)
+    testImplementation(libs.mutiny)
     // Ktor server + client are referenced ONLY from test code (real routing /
     // request DSL fixtures for the Ktor walkers). They are deliberately not on
     // the main classpath: the Ktor walkers read bytecode by FQN, so extraction

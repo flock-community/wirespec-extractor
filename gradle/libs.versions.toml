@@ -17,6 +17,8 @@ jackson = "2.18.1"
 jakarta-validation = "3.1.0"
 jakarta-jms = "3.1.0"
 jakarta-ws-rs = "3.1.0"
+resteasy-reactive = "3.15.1"
+mutiny = "2.6.2"
 swagger-annotations = "2.2.28"
 reactor = "3.7.0"
 ktor = "3.0.3"
@@ -61,6 +63,8 @@ spring-integration-core = { module = "org.springframework.integration:spring-int
 spring-graphql = { module = "org.springframework.graphql:spring-graphql", version.ref = "spring-graphql" }
 jakarta-jms-api = { module = "jakarta.jms:jakarta.jms-api", version.ref = "jakarta-jms" }
 jakarta-ws-rs-api = { module = "jakarta.ws.rs:jakarta.ws.rs-api", version.ref = "jakarta-ws-rs" }
+resteasy-reactive-common = { module = "io.quarkus.resteasy.reactive:resteasy-reactive-common", version.ref = "resteasy-reactive" }
+mutiny = { module = "io.smallrye.reactive:mutiny", version.ref = "mutiny" }
 jackson-annotations = { module = "com.fasterxml.jackson.core:jackson-annotations", version.ref = "jackson" }
 jakarta-validation = { module = "jakarta.validation:jakarta.validation-api", version.ref = "jakarta-validation" }
 swagger-annotations = { module = "io.swagger.core.v3:swagger-annotations", version.ref = "swagger-annotations" }
