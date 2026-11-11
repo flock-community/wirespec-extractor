@@ -10,7 +10,8 @@ import java.io.File
  * Verifier for the `graphql-app` fixture (Gradle: reads `build/wirespec`). Asserts that Spring for GraphQL
  * queries, mutations, and subscriptions become `rpc` definitions in the
  * controller's .ws file — annotated and named as Wirespec's GraphQL converter
- * does — and that field resolvers become fields on their non-root types.
+ * does — that field resolvers become fields on their non-root types, and that
+ * what the schema in `src/main/resources/graphql` types as `ID` is the `ID` scalar.
  */
 object GraphQlFixtureVerifier {
 
@@ -20,13 +21,14 @@ object GraphQlFixtureVerifier {
         wsDir.listFiles()!!.map { it.name }.sorted() shouldContainExactly listOf("BookController.ws")
 
         val ws = File(wsDir, "BookController.ws").readText()
-        ws shouldContain "@GraphQLQuery\n@GraphQLName(\"bookById\")\nrpc BookById {\n  id: String\n} -> Book?"
+        ws shouldContain "@GraphQLQuery\n@GraphQLName(\"bookById\")\nrpc BookById {\n  id: ID\n} -> Book?"
         ws shouldContain "@GraphQLQuery\n@GraphQLName(\"books\")\nrpc Books {\n  genre: Genre?\n} -> Book[]"
         ws shouldContain "@GraphQLMutation\n@GraphQLName(\"addBook\")\nrpc AddBook {\n  input: BookInput\n} -> Book"
         ws shouldContain "@GraphQLSubscription\n@GraphQLName(\"bookAdded\")\nrpc BookAdded {} -> Book"
         // `book` is taken by `type Book`: prefixed with the root type, field name kept.
-        ws shouldContain "@GraphQLQuery\n@GraphQLName(\"book\")\nrpc QueryBook {\n  id: String\n} -> Book?"
-        ws shouldContain "\ntype Book {"
+        ws shouldContain "@GraphQLQuery\n@GraphQLName(\"book\")\nrpc QueryBook {\n  id: ID\n} -> Book?"
+        ws shouldContain "\ntype Book {\n  id: ID,\n  title: String,"
+        ws shouldContain "@GraphQLBuiltIn\ntype ID = String"
         // Only ever taken: an input object, marked as the GraphQL converter writes it.
         ws shouldContain "@GraphQLInput\ntype BookInput {"
         ws shouldContain "enum Genre {"

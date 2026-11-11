@@ -34,7 +34,12 @@ sealed interface WireType {
         override val nullable: Boolean = false,
     ) : WireType
 
-    /** Top-level definition: a refined String/Integer/Number with constraint. */
+    /**
+     * Top-level definition: a refined String/Integer/Number with constraint.
+     *
+     * @property builtIn A GraphQL built-in scalar (`ID`), marked `@GraphQLBuiltIn` so the
+     *   GraphQL converter references it rather than declaring it.
+     */
     data class Refined(
         val name: String,
         val base: Primitive,
@@ -42,6 +47,7 @@ sealed interface WireType {
         val min: String? = null,
         val max: String? = null,
         override val nullable: Boolean = false,
+        val builtIn: Boolean = false,
     ) : WireType
 
     data class Field(

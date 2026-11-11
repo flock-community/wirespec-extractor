@@ -794,6 +794,44 @@ rpc BookAdded {} -> Book
   `ArgumentValue`), results default to nullable — GraphQL's own default — unless
   Kotlin, a `@NonNull` annotation, a primitive, or a JSpecify `@NullMarked` scope
   says otherwise.
+- **`ID` fields** are read from the GraphQL schema. On the JVM an `ID` is just a
+  `String` (or `Int` / `Long`) — Netflix DGS codegen generates exactly that — so
+  nothing in the compiled classes says it is an `ID`, and a client that declares
+  the variable as `String!` is rejected by the server. The extractor therefore
+  reads the schema files on the project's classpath under `graphql/` (Spring for
+  GraphQL's default location) and `schema/` (DGS's, and DGS codegen's
+  `src/main/resources/schema`), with extension `.graphqls`, `.graphql`, or
+  `.gqls`. Every argument, result, and object or input field the schema types as
+  `ID` becomes Wirespec's built-in `ID` scalar, the way Wirespec's GraphQL
+  converter reads one:
+
+  ```graphql
+  type Query { bookById(id: ID!): Book }
+  type Book { id: ID!  title: String! }
+  ```
+
+  ```wirespec
+  @GraphQLQuery
+  @GraphQLName("bookById")
+  rpc BookById {
+    id: ID
+  } -> Book?
+
+  type Book {
+    id: ID,
+    title: String
+  }
+
+  @GraphQLBuiltIn
+  type ID = String
+  ```
+
+  Fields are matched by GraphQL type and field name: operations by their root type,
+  `@SchemaMapping` fields by their parent type, and object and input types by the
+  extracted type's name, which is the GraphQL type's name for codegen-generated
+  types. `extend type` definitions count too. Only a string or integer is
+  retyped; nullability still comes from the handler signature. Without a schema
+  file on the classpath, an `ID` stays a `String`.
 
 The output converts back into a GraphQL schema with Wirespec's GraphQL converter —
 `GraphQLEmitter` in the `community.flock.wirespec.converter:graphql` library, or the
@@ -808,9 +846,11 @@ cleanly no-ops on projects that don't use it. Toggle it with `extractGraphQl`
 
 **Limitations (v1):**
 
-- The GraphQL schema (`.graphqls`) is not read: the contract is derived from the
-  handler signatures. `@BatchMapping` fields are not extracted, and DTO
-  properties not exposed in the schema are still emitted.
+- The contract is derived from the handler signatures; the GraphQL schema is
+  only read to find `ID` fields. `@BatchMapping` fields are not extracted, and
+  DTO properties not exposed in the schema are still emitted. A type whose
+  extracted name differs from its GraphQL name, or schema files outside
+  `graphql/` and `schema/`, are not matched.
 - Default values of input object properties are not extracted.
 - Root types renamed in the schema (`schema { query: MyQuery }`) are not
   recognised; only `Query`, `Mutation`, and `Subscription`.

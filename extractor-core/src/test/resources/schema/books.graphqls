@@ -1,0 +1,8 @@
+type Book {
+    isbn: ID!
+    title: String!
+}
+
+extend type Author {
+    books(after: ID, first: Int): [Book!]!
+}

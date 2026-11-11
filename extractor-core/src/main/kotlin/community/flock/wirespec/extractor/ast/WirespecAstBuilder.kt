@@ -124,7 +124,7 @@ class WirespecAstBuilder {
         )
         is WireType.Refined -> WsRefined(
             comment = null,
-            annotations = emptyList(),
+            annotations = if (wt.builtIn) listOf(Annotation("GraphQLBuiltIn", emptyList())) else emptyList(),
             identifier = DefinitionIdentifier(wt.name),
             reference = buildRefinedReference(wt),
         )
