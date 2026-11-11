@@ -541,7 +541,7 @@ swagger/OpenAPI annotations**:
   custom HTTP-method annotations work too). Swagger annotations carry no URL
   path, which is why routing must come from JAX-RS.
 - **Parameters** come from `@PathParam` / `@QueryParam` / `@HeaderParam` /
-  `@CookieParam`, or from a swagger `@Parameter(in = …)` when no JAX-RS binding
+  `@CookieParam` (or the [Quarkus REST](#quarkus-rest) shorthands), or from a swagger `@Parameter(in = …)` when no JAX-RS binding
   annotation is present. Path params default to required (non-null); query,
   header, and cookie params default to optional (nullable) unless
   `@Parameter(required = true)`, a `@NotNull`, or a non-null Kotlin type says
@@ -577,6 +577,33 @@ class UserResource {
     fun getOne(@PathParam("id") id: String): UserDto = …
 }
 ```
+
+Routing annotations are **inherited**: a resource method with no HTTP-method
+annotation of its own takes them — and the parameter annotations — from the
+superclass or interface method it overrides, so a `@Path` class implementing an
+annotated contract interface is extracted too.
+
+#### Quarkus REST
+
+Resources written with the Quarkus REST (RESTEasy Reactive) idioms are read the
+same way:
+
+- `@RestPath` / `@RestQuery` / `@RestHeader` / `@RestCookie` bind like their
+  JAX-RS equivalents. An unnamed `@RestHeader` derives the header from the
+  parameter name, as Quarkus does (`xTraceId` → `X-Trace-Id`).
+- A bare parameter named after a path variable that no other parameter binds is
+  that path parameter, not the request entity (needs `-parameters`, which
+  Quarkus projects enable by default).
+- Container-injected types (`UriInfo`, `HttpHeaders`, `SecurityContext`, Vert.x
+  `RoutingContext`, …) are never the request entity, with or without `@Context`.
+- `Uni<T>`, `CompletionStage<T>` and `RestResponse<T>` are unwrapped to `T`;
+  `Multi<T>` becomes `T[]`. `@ResponseStatus` sets the response status.
+- An untyped `Response` hides its entity type, so it is emitted as a body-less
+  `200`. Declare the real shape with swagger `@ApiResponse`.
+
+MicroProfile OpenAPI annotations (`org.eclipse.microprofile.openapi`, the ones
+`quarkus-smallrye-openapi` uses) are not read — only the swagger
+`io.swagger.v3.oas` annotations are.
 
 JAX-RS annotations are read reflectively by fully-qualified name, so — like the
 messaging scanners — the extractor needs no JAX-RS API on its own classpath and

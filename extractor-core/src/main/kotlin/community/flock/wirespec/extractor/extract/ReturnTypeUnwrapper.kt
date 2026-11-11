@@ -15,8 +15,19 @@ object ReturnTypeUnwrapper {
         "reactor.core.publisher.Mono",
         "java.util.concurrent.Callable",
         "org.springframework.web.context.request.async.DeferredResult",
+        "java.util.concurrent.CompletionStage",
+        "java.util.concurrent.CompletableFuture",
+        // Quarkus REST: Mutiny's single-item type and the typed response wrapper.
+        "io.smallrye.mutiny.Uni",
+        "org.jboss.resteasy.reactive.RestResponse",
     )
-    private const val FLUX = "reactor.core.publisher.Flux"
+
+    /** Multi-item reactive streams: the payload is a list of the element type. */
+    private val STREAMS = setOf(
+        "reactor.core.publisher.Flux",
+        "io.smallrye.mutiny.Multi",
+        "org.jboss.resteasy.reactive.RestMulti",
+    )
     private const val CONTINUATION = "kotlin.coroutines.Continuation"
     private const val KOTLIN_UNIT = "kotlin.Unit"
 
@@ -64,7 +75,7 @@ object ReturnTypeUnwrapper {
             val rawName = (current as? ParameterizedType)?.rawType?.typeName
                 ?: (current as? Class<*>)?.name
 
-            if (rawName == FLUX && current is ParameterizedType) {
+            if (rawName in STREAMS && current is ParameterizedType) {
                 isList = true
                 current = current.actualTypeArguments[0]
                 continue
