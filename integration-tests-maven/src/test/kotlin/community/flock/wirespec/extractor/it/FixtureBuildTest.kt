@@ -113,6 +113,7 @@ class FixtureBuildTest {
             "dsl-webflux-app"  -> DslFixtureVerifiers.verifyWebFluxApp(File(workDir, "target/wirespec"))
             "dsl-mvc-app"      -> DslFixtureVerifiers.verifyMvcApp(File(workDir, "target/wirespec"))
             "dsl-java-app"     -> DslFixtureVerifiers.verifyJavaApp(File(workDir, "target/wirespec"))
+            "jaxrs-java-app"   -> verifyJaxRsJavaApp(workDir)
             "graphql-app"      -> GraphQlFixtureVerifier.verify(File(workDir, "target/wirespec"))
             "kafka-app"        -> KafkaFixtureVerifier.verify(File(workDir, "target/wirespec"))
             "messaging-app"    -> MessagingFixtureVerifier.verify(File(workDir, "target/wirespec"))
@@ -272,6 +273,18 @@ class FixtureBuildTest {
                 "basic-kotlin-app/types.ws",
             )
         }
+    }
+
+    /** Plain `jakarta.ws.rs` resource (no Spring, no swagger) with a single `GET /yolo` endpoint. */
+    private fun verifyJaxRsJavaApp(workDir: File) {
+        val wsDir = File(workDir, "target/wirespec")
+        assertTrue(wsDir.isDirectory) { "wirespec output dir missing at ${wsDir.absolutePath}" }
+
+        val files = wsDir.listFiles()!!.map { it.name }.sorted()
+        files.shouldContainExactly("YoloResource.ws")
+
+        val resource = File(wsDir, "YoloResource.ws").readText()
+        resource shouldMatch Regex("(?s).*endpoint Yolo GET /yolo\\s*->\\s*\\{\\s*200 -> String\\s*}.*")
     }
 
     private fun verifyBasicSpringApp(workDir: File) {
