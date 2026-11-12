@@ -1,5 +1,6 @@
 package community.flock.wirespec.extractor.extract.dsl
 
+import community.flock.wirespec.extractor.SkipWarnings
 import community.flock.wirespec.extractor.scan.isDeclaredType
 import io.github.classgraph.ClassGraph
 import io.github.classgraph.ClassInfo
@@ -54,7 +55,7 @@ internal object DslRouteScanner {
                 .mapNotNull { ci ->
                     try { ci.loadClass() }
                     catch (t: Throwable) {
-                        onWarn("Skipping DSL candidate ${ci.name}: ${t.message}")
+                        onWarn(SkipWarnings.skipping("functional-DSL candidate", ci.name, t, "its routes are missing from the contract"))
                         null
                     }
                 }

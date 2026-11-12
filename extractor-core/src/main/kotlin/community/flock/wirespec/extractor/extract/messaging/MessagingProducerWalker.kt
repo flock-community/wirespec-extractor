@@ -1,5 +1,6 @@
 package community.flock.wirespec.extractor.extract.messaging
 
+import community.flock.wirespec.extractor.SkipWarnings
 import org.objectweb.asm.ClassReader
 import org.objectweb.asm.Opcodes
 import org.objectweb.asm.Type as AsmType
@@ -122,7 +123,7 @@ internal object MessagingProducerWalker {
         return try {
             Class.forName(resolved, false, loader)
         } catch (t: Throwable) {
-            onWarn("messaging.producer: skipping ${clazz.name}.${method.name}: cannot load $resolved: ${t.message}")
+            onWarn("messaging.producer: skipping ${clazz.name}.${method.name}: cannot load $resolved: ${SkipWarnings.cause(t)}")
             null
         }
     }

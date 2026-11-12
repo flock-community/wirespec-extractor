@@ -20,7 +20,9 @@ private const val WIRESPEC_CLASSIFIER = "wirespec"
 @Mojo(
     name = "extract",
     defaultPhase = LifecyclePhase.PROCESS_CLASSES,
-    requiresDependencyResolution = ResolutionScope.RUNTIME,
+    // Compile and runtime scope: the scanned classes were compiled against `provided` (and
+    // `system`) dependencies too, and reflecting on them needs every type they reference.
+    requiresDependencyResolution = ResolutionScope.COMPILE_PLUS_RUNTIME,
     threadSafe = true,
 )
 class ExtractMojo : AbstractMojo() {
@@ -70,8 +72,13 @@ class ExtractMojo : AbstractMojo() {
     private var projectHelper: MavenProjectHelper? = null
 
     override fun execute() {
+        // Everything the module compiles or runs with. Runtime scope alone misses `provided`
+        // jars, such as a JAX-RS API a parent pom manages as provided: the resources that
+        // reference it then can't be reflected on, and are skipped.
         val runtimeClasspath: List<File> = try {
-            project.runtimeClasspathElements.orEmpty().map(::File)
+            (project.compileClasspathElements.orEmpty() + project.runtimeClasspathElements.orEmpty())
+                .distinct()
+                .map(::File)
         } catch (_: Exception) {
             // DependencyResolutionRequiredException in unit-test contexts where
             // dependency resolution hasn't run; tolerate it and use empty classpath.

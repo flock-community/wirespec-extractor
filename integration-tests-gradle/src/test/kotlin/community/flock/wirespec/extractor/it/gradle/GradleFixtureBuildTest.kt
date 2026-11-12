@@ -72,6 +72,7 @@ class GradleFixtureBuildTest {
             "dsl-mvc-app"      -> DslFixtureVerifiers.verifyMvcApp(File(workDir, "build/wirespec"))
             "dsl-java-app"     -> DslFixtureVerifiers.verifyJavaApp(File(workDir, "build/wirespec"))
             "graphql-app"      -> GraphQlFixtureVerifier.verify(File(workDir, "build/wirespec"))
+            "jaxrs-compile-only-app" -> verifyJaxRsCompileOnlyApp(workDir, result.output)
             "kafka-app"        -> KafkaFixtureVerifier.verify(File(workDir, "build/wirespec"))
             "messaging-app"    -> MessagingFixtureVerifier.verify(File(workDir, "build/wirespec"))
             else -> error("No verifier registered for fixture ${fixture.name}")
@@ -266,4 +267,25 @@ class GradleFixtureBuildTest {
 
     private fun sysProp(key: String): String =
         System.getProperty(key) ?: error("System property '$key' not set")
+
+    /**
+     * The JAX-RS API is `compileOnly`, so it is not on the runtime classpath: the extractor must
+     * load it from the compile classpath, or no resource produces a .ws file.
+     */
+    private fun verifyJaxRsCompileOnlyApp(workDir: File, output: String) {
+        val wsDir = File(workDir, "build/wirespec")
+        assertTrue(wsDir.isDirectory) { "wirespec output dir missing at ${wsDir.absolutePath}" }
+        assertTrue("Skipping" !in output) { "The extractor skipped a class:\n$output" }
+
+        val files = wsDir.listFiles()!!.map { it.name }.sorted()
+        assertTrue(files == listOf("GreetingResource.ws", "ReadinessResource.ws")) { "Unexpected .ws files: $files" }
+
+        fun endpoint(signature: String, response: String) =
+            Regex("(?s).*" + Regex.escape("endpoint $signature -> {") + "\\s*" + Regex.escape(response) + "\\s*}.*")
+
+        val greeting = File(wsDir, "GreetingResource.ws").readText()
+        assertTrue(endpoint("Hello GET /hello", "200 -> String").matches(greeting)) { greeting }
+        val readiness = File(wsDir, "ReadinessResource.ws").readText()
+        assertTrue(endpoint("Ready GET /ready", "200 -> String\n  503 -> String").matches(readiness)) { readiness }
+    }
 }

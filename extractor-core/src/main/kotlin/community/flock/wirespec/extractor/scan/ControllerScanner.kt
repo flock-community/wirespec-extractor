@@ -1,5 +1,6 @@
 package community.flock.wirespec.extractor.scan
 
+import community.flock.wirespec.extractor.SkipWarnings
 import io.github.classgraph.ClassGraph
 import io.github.classgraph.ClassInfo
 
@@ -52,7 +53,7 @@ object ControllerScanner {
                 .mapNotNull { ci ->
                     try { ci.loadClass() }
                     catch (t: Throwable) {
-                        onWarn("Skipping ${ci.name}: ${t.message}")
+                        onWarn(SkipWarnings.skipping("Spring controller", ci.name, t))
                         null
                     }
                 }

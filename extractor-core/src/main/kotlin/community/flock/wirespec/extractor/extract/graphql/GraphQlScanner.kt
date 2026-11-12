@@ -1,5 +1,6 @@
 package community.flock.wirespec.extractor.extract.graphql
 
+import community.flock.wirespec.extractor.SkipWarnings
 import io.github.classgraph.ClassGraph
 
 /**
@@ -52,7 +53,7 @@ internal object GraphQlScanner {
                 .mapNotNull { ci ->
                     try { ci.loadClass() }
                     catch (t: Throwable) {
-                        onWarn("graphql: skipping ${ci.name}: ${t.message}")
+                        onWarn(SkipWarnings.skipping("GraphQL controller", ci.name, t, "its operations are missing from the contract"))
                         null
                     }
                 }

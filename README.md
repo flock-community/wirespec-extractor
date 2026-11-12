@@ -973,8 +973,12 @@ Wrote 3 .ws file(s) to /path/to/target/wirespec
 ```
 
 - The scanned count covers the project's own compiled classes (restricted to
-  `basePackage` when set); dependency jars on the runtime classpath are not
-  counted.
+  `basePackage` when set); dependency jars are not counted.
+- Types the scanned classes reference are loaded from the module's compile and
+  runtime dependencies, `provided` (Maven) and `compileOnly` (Gradle) included.
+  A class that still can't be loaded or read is skipped with a `Skipping …`
+  warning naming what is missing from the contract and why, for example the
+  class that is not on the extraction classpath and how to add it.
 - Categories switched off (`extractSpring`, `extractOpenApi`, `extractKtor`,
   `extractGraphQl`) are not scanned and not listed.
 - Maven logs these lines at `INFO`; the Gradle plugin logs them at `LIFECYCLE`,
