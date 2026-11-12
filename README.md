@@ -900,3 +900,25 @@ for the full design and current scope limitations.
   controllers. Omitted when all types are controller-local.
 - The output directory is treated as a generated artifact: existing `*.ws`
   files are deleted on each run; non-`.ws` files are left alone.
+
+## Build log
+
+Every run logs how many classes it scanned and what it found, so a run that
+writes nothing still says why:
+
+```
+Scanned 14 class(es) under com.acme in /path/to/target/classes
+Found 2 Spring controller(s): AdminController, UserController
+Found 1 kafka listener method(s): OrderConsumer.onOrder
+Found no functional-DSL configuration(s), JAX-RS resource(s), Ktor routing configuration(s), Ktor client(s), GraphQL controller(s), messaging producer method(s)
+Extracted 7 endpoint(s), 1 channel(s), 0 RPC(s) and 5 type(s)
+Wrote 3 .ws file(s) to /path/to/target/wirespec
+```
+
+- The scanned count covers the project's own compiled classes (restricted to
+  `basePackage` when set); dependency jars on the runtime classpath are not
+  counted.
+- Categories switched off (`extractSpring`, `extractOpenApi`, `extractKtor`,
+  `extractGraphQl`) are not scanned and not listed.
+- Maven logs these lines at `INFO`; the Gradle plugin logs them at `LIFECYCLE`,
+  so both show them without extra flags.
