@@ -1,6 +1,7 @@
 // src/main/kotlin/community/flock/wirespec/extractor/extract/ApiResponseExtractor.kt
 package community.flock.wirespec.extractor.extract
 
+import community.flock.wirespec.extractor.extract.jaxrs.MicroProfileApiResponses
 import community.flock.wirespec.extractor.extract.jaxrs.SwaggerContent
 import community.flock.wirespec.extractor.model.Endpoint
 import community.flock.wirespec.extractor.model.WireType
@@ -9,12 +10,16 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses
 import org.springframework.core.annotation.AnnotatedElementUtils
 import java.lang.reflect.Method
 
+/** A response declared by an annotation: its `responseCode` and the body its content declares. */
+internal class DeclaredResponse(val responseCode: String, val body: () -> WireType?)
+
 /**
- * Reads springdoc `@ApiResponses` / `@ApiResponse` declarations on a handler
- * method and produces one [Endpoint.Response] per declared status.
+ * Reads the responses declared on a handler method — springdoc/swagger `@ApiResponses` /
+ * `@ApiResponse`, or MicroProfile OpenAPI `@APIResponses` / `@APIResponse` — and produces
+ * one [Endpoint.Response] per declared status.
  *
- * Falls back to a single response built from the method signature when no
- * such annotations are present.
+ * Falls back to the responses the handler itself implies — its signature, or what a
+ * scanner read from its body — when no such annotations are present.
  */
 class ApiResponseExtractor(
     private val types: TypeExtractor,
@@ -22,40 +27,61 @@ class ApiResponseExtractor(
 ) {
 
     /**
-     * @param natural overrides the response derived from the method signature — the one
-     *                used when no `@ApiResponse` is declared, and whose body backs a
-     *                declared response of the same status that has no content of its own.
+     * A response implied by the handler itself rather than declared. Its body is resolved
+     * only when used, so one that a declared response replaces registers no types.
+     */
+    class Natural(val statusCode: Int, body: () -> WireType?) {
+        val body: WireType? by lazy(body)
+    }
+
+    /**
+     * @param natural overrides the responses derived from the method signature — the ones
+     *                used when no response is declared, and whose bodies back a declared
+     *                response of the same status that has no content of its own.
      */
     fun extract(
         method: Method,
         unwrapped: ReturnTypeUnwrapper.Unwrapped,
-        natural: Endpoint.Response? = null,
+        natural: List<Natural>? = null,
     ): List<Endpoint.Response> {
-        val declared = collectApiResponses(method)
-        val naturalStatus = natural?.statusCode ?: ReturnTypeUnwrapper.statusCodeFor(method, unwrapped)
-        val naturalBody = if (natural != null) natural.body else methodBody(unwrapped)
+        val declared = collectDeclared(method)
+        val naturals = natural?.takeIf { it.isNotEmpty() } ?: run {
+            val body = methodBody(unwrapped)
+            listOf(Natural(ReturnTypeUnwrapper.statusCodeFor(method, unwrapped)) { body })
+        }
 
         if (declared.isEmpty()) {
-            return listOf(Endpoint.Response(naturalStatus, naturalBody))
+            return naturals.map { Endpoint.Response(it.statusCode, it.body) }
         }
 
         val out = mutableListOf<Endpoint.Response>()
-        for (ann in declared) {
-            val status = ann.responseCode.toIntOrNull()
+        for (d in declared) {
+            val status = d.responseCode.toIntOrNull()
             if (status == null) {
                 onWarn(
-                    "Skipping non-numeric @ApiResponse.responseCode '${ann.responseCode}' " +
+                    "Skipping non-numeric @ApiResponse.responseCode '${d.responseCode}' " +
                         "on ${method.declaringClass.simpleName}#${method.name}"
                 )
                 continue
             }
-            val body = bodyFromContent(ann)
-                ?: if (status == naturalStatus) naturalBody else null
+            val body = d.body() ?: naturals.firstOrNull { it.statusCode == status }?.body
             out += Endpoint.Response(status, body)
         }
-        // Defensive: if every entry was skipped, fall back to the natural response so the
+        // Defensive: if every entry was skipped, fall back to the natural responses so the
         // endpoint still has at least one response.
-        return out.ifEmpty { listOf(Endpoint.Response(naturalStatus, naturalBody)) }
+        return out.ifEmpty { naturals.map { Endpoint.Response(it.statusCode, it.body) } }
+    }
+
+    /** Whether [method] declares its responses with `@ApiResponse`(s) or `@APIResponse`(s). */
+    fun declares(method: Method): Boolean = collectDeclared(method).isNotEmpty()
+
+    /** Swagger's declarations, then MicroProfile's for statuses swagger does not declare. */
+    private fun collectDeclared(method: Method): List<DeclaredResponse> {
+        val swagger = collectApiResponses(method).map { ann ->
+            DeclaredResponse(ann.responseCode) { bodyFromContent(ann) }
+        }
+        val seen = swagger.map { it.responseCode }.toMutableSet()
+        return swagger + MicroProfileApiResponses.of(method, types).filter { seen.add(it.responseCode) }
     }
 
     private fun collectApiResponses(method: Method): List<ApiResponse> {

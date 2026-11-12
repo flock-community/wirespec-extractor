@@ -9,6 +9,9 @@ import jakarta.ws.rs.PUT;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.core.Response;
+import org.eclipse.microprofile.openapi.annotations.media.Content;
+import org.eclipse.microprofile.openapi.annotations.media.Schema;
+import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.jboss.resteasy.reactive.ResponseStatus;
 import org.jboss.resteasy.reactive.RestHeader;
 import org.jboss.resteasy.reactive.RestPath;
@@ -61,5 +64,18 @@ public class FruitResource {
     @Path("/{name}")
     public Response delete(@RestPath String name) {
         return Response.noContent().build();
+    }
+
+    /** Built by a helper, so not readable from this body: MicroProfile OpenAPI declares it. */
+    @GET
+    @Path("/{name}/stock")
+    @APIResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = Integer.class)))
+    @APIResponse(responseCode = "404")
+    public Response stock(@RestPath String name) {
+        return stockOf(name);
+    }
+
+    private static Response stockOf(String name) {
+        return name.isEmpty() ? Response.status(Response.Status.NOT_FOUND).build() : Response.ok(42).build();
     }
 }

@@ -3,6 +3,7 @@ package community.flock.wirespec.extractor.extract.jaxrs
 import java.lang.reflect.AnnotatedElement
 import java.lang.reflect.Method
 import java.lang.reflect.Parameter
+import java.lang.reflect.Type
 
 /**
  * Reflective access to JAX-RS annotations.
@@ -40,6 +41,15 @@ internal object JaxRs {
 
     /** The untyped JAX-RS response: its entity type is not visible in the method signature. */
     val RESPONSE = ns("core.Response")
+
+    /** The Quarkus REST response. Typed, it is unwrapped to its entity; raw, it is as untyped as [RESPONSE]. */
+    private const val REST_RESPONSE = "$QUARKUS_REST.RestResponse"
+
+    /** Responses whose status and entity a resource method sets by building them in its body. */
+    val BUILT_RESPONSES: List<String> = RESPONSE + REST_RESPONSE
+
+    /** True when [type] — a method's unwrapped return type — hides the entity's type. */
+    fun isUntypedResponse(type: Type): Boolean = type is Class<*> && type.name in BUILT_RESPONSES
 
     private const val REST_HEADER = "$QUARKUS_REST.RestHeader"
     private const val REST_RESPONSE_STATUS = "$QUARKUS_REST.ResponseStatus"

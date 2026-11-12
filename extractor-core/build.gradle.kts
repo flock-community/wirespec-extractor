@@ -28,6 +28,8 @@ dependencies {
     implementation(libs.classgraph)
     implementation(libs.asm)
     implementation(libs.asm.tree)
+    // Data-flow analysis of JAX-RS resource method bodies (JaxRsResponseScanner).
+    implementation(libs.asm.analysis)
     // `api` because WirespecAstBuilder.toEndpoint / toDefinition expose
     // Wirespec compiler AST types in their public signatures — consumers
     // of extractor-core (e.g. ExtractMojo) need those types on the
@@ -72,6 +74,9 @@ dependencies {
     // Quarkus resource fixtures. Test-only for the same reason: they are read by FQN.
     testImplementation(libs.resteasy.reactive.common)
     testImplementation(libs.mutiny)
+    // MicroProfile OpenAPI annotations (`@APIResponse`), as Quarkus projects use them. Test-only
+    // for the same reason: they are read by FQN.
+    testImplementation(libs.microprofile.openapi.api)
     // Ktor server + client are referenced ONLY from test code (real routing /
     // request DSL fixtures for the Ktor walkers). They are deliberately not on
     // the main classpath: the Ktor walkers read bytecode by FQN, so extraction
