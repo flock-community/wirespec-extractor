@@ -19,6 +19,25 @@ dependencies {
 // :integration-tests (Maven) module — both write into the same `it-repo`.
 val itRepoDir = rootProject.layout.buildDirectory.dir("it-repo")
 
+// What the fixture builds run: the Gradle plugin with extractor-core and their runtime
+// dependencies. `test` publishes it to `it-repo` first, but does not track that directory, so
+// it is declared as an input: a change to any of it reruns the ITs instead of `test` being
+// skipped as up-to-date (or restored from the build cache).
+val itPlugin by configurations.creating {
+    isCanBeConsumed = false
+    isCanBeResolved = true
+    attributes {
+        attribute(Usage.USAGE_ATTRIBUTE, objects.named(Usage.JAVA_RUNTIME))
+        attribute(Category.CATEGORY_ATTRIBUTE, objects.named(Category.LIBRARY))
+        attribute(LibraryElements.LIBRARY_ELEMENTS_ATTRIBUTE, objects.named(LibraryElements.JAR))
+        attribute(Bundling.BUNDLING_ATTRIBUTE, objects.named(Bundling.EXTERNAL))
+    }
+}
+
+dependencies {
+    itPlugin(project(":extractor-gradle-plugin"))
+}
+
 tasks.test {
     useJUnitPlatform()
 
@@ -27,6 +46,10 @@ tasks.test {
     // before the IT runs. Marker is what makes `plugins { id("...") }` resolve.
     dependsOn(":extractor-gradle-plugin:publishAllPublicationsToItLocalRepository")
     dependsOn(":extractor-core:publishMavenPublicationToItLocalRepository")
+
+    inputs.files(itPlugin).withPropertyName("itPlugin").withNormalizer(ClasspathNormalizer::class.java)
+    // The fixture projects are passed by path only, so their sources are tracked explicitly.
+    inputs.dir("src/it").withPropertyName("fixtures").withPathSensitivity(PathSensitivity.RELATIVE)
 
     systemProperty("it.pluginVersion", project.version.toString())
     systemProperty("it.repo", itRepoDir.get().asFile.absolutePath)
