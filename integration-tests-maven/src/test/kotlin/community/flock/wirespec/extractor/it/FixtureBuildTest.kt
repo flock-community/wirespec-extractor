@@ -39,6 +39,11 @@ class FixtureBuildTest {
      * snapshot Gradle published. (Maven's local-repo layout expects non-
      * timestamped snapshot filenames, which Gradle's `maven-publish` does not
      * produce for a `maven { url = ... }` target.)
+     *
+     * Every run publishes a new snapshot, but [mavenLocalRepo] outlives the run
+     * and Maven re-checks a snapshot only once a day by default — it would keep
+     * testing the plugin it cached first. `updatePolicy=always` makes every
+     * fixture build resolve the latest one.
      */
     private val settingsXml: File by lazy {
         val file = File(workRoot, "settings.xml").also { it.parentFile.mkdirs() }
@@ -53,14 +58,14 @@ class FixtureBuildTest {
                     <repository>
                       <id>it-local</id>
                       <url>${itRepo.toURI()}</url>
-                      <snapshots><enabled>true</enabled></snapshots>
+                      <snapshots><enabled>true</enabled><updatePolicy>always</updatePolicy></snapshots>
                     </repository>
                   </repositories>
                   <pluginRepositories>
                     <pluginRepository>
                       <id>it-local</id>
                       <url>${itRepo.toURI()}</url>
-                      <snapshots><enabled>true</enabled></snapshots>
+                      <snapshots><enabled>true</enabled><updatePolicy>always</updatePolicy></snapshots>
                     </pluginRepository>
                   </pluginRepositories>
                 </profile>
