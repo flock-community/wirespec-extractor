@@ -1,8 +1,11 @@
 package community.flock.wirespec.extractor
 
 import community.flock.wirespec.compiler.core.parse.ast.Annotation
+import community.flock.wirespec.compiler.core.parse.ast.Channel as WsChannel
 import community.flock.wirespec.compiler.core.parse.ast.Definition
+import community.flock.wirespec.compiler.core.parse.ast.Endpoint as WsEndpoint
 import community.flock.wirespec.compiler.core.parse.ast.Field as WsField
+import community.flock.wirespec.compiler.core.parse.ast.Rpc as WsRpc
 import community.flock.wirespec.compiler.core.parse.ast.Shape as WsShape
 import community.flock.wirespec.compiler.core.parse.ast.Type as WsType
 import community.flock.wirespec.extractor.ast.WirespecAstBuilder
@@ -32,6 +35,7 @@ import community.flock.wirespec.extractor.extract.messaging.MessagingProducerWal
 import community.flock.wirespec.extractor.model.Rpc
 import community.flock.wirespec.extractor.model.WireType
 import community.flock.wirespec.extractor.ownership.TypeOwnership
+import community.flock.wirespec.extractor.scan.ClassCounter
 import community.flock.wirespec.extractor.scan.ControllerScanner
 import community.flock.wirespec.extractor.scan.JaxRsResourceScanner
 import java.io.File
@@ -73,57 +77,57 @@ object WirespecExtractor {
             config.log.warn("Both Spring and OpenAPI extraction are disabled; nothing to extract.")
         }
 
+        val scannedDirs = classesDirs.filter { it.isDirectory }.joinToString(", ") { it.absolutePath }
+        val scannedClasses = ClassCounter.count(classesDirs, effectiveBasePackage)
+        config.log.info(
+            "Scanned $scannedClasses class(es)" +
+                (effectiveBasePackage?.let { " under $it" } ?: "") +
+                " in $scannedDirs"
+        )
+
+        val findings = FindingsLog(config.log)
+
         return ClasspathBuilder.fromUrls(urls, parent = javaClass.classLoader).use { loader ->
             val controllers = if (config.extractSpring) {
                 ControllerScanner.scan(
                     loader, scanPackages, effectiveBasePackage,
                     onWarn = { msg -> config.log.warn(msg) },
-                ).also { config.log.info("Found ${it.size} controller(s)") }
+                ).also { findings.foundClasses("Spring controller(s)", it) }
             } else emptyList()
 
             val dslConfigs = if (config.extractSpring) {
                 DslRouteScanner.scan(
                     loader, scanPackages, effectiveBasePackage,
                     onWarn = { msg -> config.log.warn(msg) },
-                ).also {
-                    if (it.isNotEmpty()) config.log.info("Found ${it.size} functional-DSL configuration(s)")
-                }
+                ).also { findings.foundClasses("functional-DSL configuration(s)", it) }
             } else emptyList()
 
             val jaxrsResources = if (config.extractOpenApi) {
                 JaxRsResourceScanner.scan(
                     loader, scanPackages, effectiveBasePackage,
                     onWarn = { msg -> config.log.warn(msg) },
-                ).also {
-                    if (it.isNotEmpty()) config.log.info("Found ${it.size} JAX-RS resource(s)")
-                }
+                ).also { findings.foundClasses("JAX-RS resource(s)", it) }
             } else emptyList()
 
             val ktorRoutingConfigs = if (config.extractKtor) {
                 KtorRoutingScanner.scan(
                     loader, scanPackages, effectiveBasePackage,
                     onWarn = { msg -> config.log.warn(msg) },
-                ).also {
-                    if (it.isNotEmpty()) config.log.info("Found ${it.size} Ktor routing configuration(s)")
-                }
+                ).also { findings.foundClasses("Ktor routing configuration(s)", it) }
             } else emptyList()
 
             val ktorClients = if (config.extractKtor) {
                 KtorClientScanner.scan(
                     loader, scanPackages, effectiveBasePackage,
                     onWarn = { msg -> config.log.warn(msg) },
-                ).also {
-                    if (it.isNotEmpty()) config.log.info("Found ${it.size} Ktor client(s)")
-                }
+                ).also { findings.foundClasses("Ktor client(s)", it) }
             } else emptyList()
 
             val graphQlControllers = if (config.extractGraphQl) {
                 GraphQlScanner.scan(
                     loader, scanPackages, effectiveBasePackage,
                     onWarn = { msg -> config.log.warn(msg) },
-                ).also {
-                    if (it.isNotEmpty()) config.log.info("Found ${it.size} GraphQL controller(s)")
-                }
+                ).also { findings.foundClasses("GraphQL controller(s)", it) }
             } else emptyList()
 
             // One class may be found by several scanners (a @Controller serving both
@@ -258,14 +262,14 @@ object WirespecExtractor {
 
             // -- Messaging channels (Kafka, JMS, Rabbit, Pulsar, Spring Integration) ----
             val messagingExtractor = MessagingChannelExtractor(types, onWarn = { msg -> config.log.warn(msg) })
+            val listenersByBroker = linkedMapOf<String, List<String>>()
+            val producersByBroker = linkedMapOf<String, List<String>>()
             for (broker in if (config.extractSpring) MessagingBroker.ALL else emptyList()) {
                 val listenerSites = MessagingListenerScanner.scan(
                     loader, scanPackages, effectiveBasePackage, broker,
                     onWarn = { msg -> config.log.warn(msg) },
                 )
-                if (listenerSites.isNotEmpty()) {
-                    config.log.info("Found ${listenerSites.size} ${broker.id} listener method(s)")
-                }
+                listenersByBroker[broker.id] = listenerSites.map { "${it.ownerClass.simpleName}.${it.method.name}" }
                 for (channel in messagingExtractor.fromListenerSites(listenerSites, broker)) {
                     val ws = builder.toChannel(channel)
                     val key = channel.ownerSimpleName
@@ -276,19 +280,22 @@ object WirespecExtractor {
                     loader, scanPackages, effectiveBasePackage, broker,
                     onWarn = { msg -> config.log.warn(msg) },
                 )
-                if (templateFields.isNotEmpty()) {
-                    config.log.info("Found ${templateFields.size} ${broker.id} template field(s)")
-                }
                 val producerOwners = templateFields.map { it.ownerClass }.distinct()
                 val producerSites = producerOwners.flatMap { owner ->
                     MessagingProducerWalker.walk(owner, templateFields, broker, onWarn = { msg -> config.log.warn(msg) })
                 }
+                producersByBroker[broker.id] = producerSites.map { "${it.ownerClass.simpleName}.${it.enclosingMethod}" }.distinct()
                 for (channel in messagingExtractor.fromProducerSites(producerSites)) {
                     val ws = builder.toChannel(channel)
                     val key = channel.ownerSimpleName
                     byController[key] = byController[key].orEmpty() + (ws as Definition)
                 }
             }
+            if (config.extractSpring) {
+                findings.foundPerBroker("listener method(s)", listenersByBroker)
+                findings.foundPerBroker("producer method(s)", producersByBroker)
+            }
+            findings.logNothingFound()
 
             val typeDefinitions = types.definitions.map(schemaIds::definition).let { defs ->
                 defs + listOfNotNull(schemaIds.idDefinition)
@@ -329,6 +336,13 @@ object WirespecExtractor {
             }
 
             val byControllerFinal = byController.filterValues { it.isNotEmpty() }
+            val extracted = byControllerFinal.values.flatten()
+            config.log.info(
+                "Extracted ${extracted.count { it is WsEndpoint }} endpoint(s), " +
+                    "${extracted.count { it is WsChannel }} channel(s), " +
+                    "${extracted.count { it is WsRpc }} RPC(s) and " +
+                    "${allTypes.size} type(s)"
+            )
 
             val partition = TypeOwnership.partition(
                 endpointsByController = byControllerFinal,
@@ -351,6 +365,33 @@ object WirespecExtractor {
                 filesWritten = filesWritten,
             )
         }
+    }
+}
+
+/**
+ * Reports what each scanner found, so a run always says what it saw: a `Found N …: names`
+ * line per category with results, and one `Found no …` line naming the categories that came
+ * up empty (logged by [logNothingFound] once every scanner has run).
+ */
+internal class FindingsLog(private val log: ExtractLog) {
+    private val nothingFound = mutableListOf<String>()
+
+    fun foundClasses(what: String, classes: List<Class<*>>) = found(what, classes.map { it.simpleName })
+
+    fun found(what: String, names: List<String>) {
+        if (names.isEmpty()) nothingFound += what
+        else log.info("Found ${names.size} $what: ${names.joinToString(", ")}")
+    }
+
+    /** One line per broker with results; a single `messaging …` entry when no broker had any. */
+    fun foundPerBroker(what: String, namesByBroker: Map<String, List<String>>) {
+        val withResults = namesByBroker.filterValues { it.isNotEmpty() }
+        if (withResults.isEmpty()) nothingFound += "messaging $what"
+        withResults.forEach { (broker, names) -> found("$broker $what", names) }
+    }
+
+    fun logNothingFound() {
+        if (nothingFound.isNotEmpty()) log.info("Found no ${nothingFound.joinToString(", ")}")
     }
 }
 

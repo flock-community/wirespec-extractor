@@ -1,6 +1,8 @@
 package community.flock.wirespec.extractor
 
+import community.flock.wirespec.extractor.scan.ClassCounter
 import io.kotest.matchers.collections.shouldContainAll
+import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
@@ -131,8 +133,50 @@ class WirespecExtractorTest {
             )
         )
 
-        infos.any { it.startsWith("Found ") && it.endsWith(" controller(s)") } shouldBe true
+        val scanned = ClassCounter.count(listOf(thisModuleClassesDir()), "community.flock.wirespec.extractor.fixtures")
+        infos.first() shouldBe
+            "Scanned $scanned class(es) under community.flock.wirespec.extractor.fixtures in ${thisModuleClassesDir().absolutePath}"
+        infos.single { it.startsWith("Found ") && it.contains(" Spring controller(s): ") } shouldContain "HelloController"
+        infos.any { it.startsWith("Extracted ") && it.contains(" endpoint(s), ") && it.endsWith(" type(s)") } shouldBe true
         infos.any { it.startsWith("Wrote ") && it.contains(".ws file(s) to") } shouldBe true
+    }
+
+    @Test
+    fun `extract always logs the categories in which nothing was found`(@TempDir tmp: Path) {
+        val out = File(tmp.toFile(), "ws").apply { mkdirs() }
+        val infos = mutableListOf<String>()
+        val log = object : ExtractLog {
+            override fun info(msg: String) { infos += msg }
+            override fun warn(msg: String) {}
+        }
+
+        // Only functional-DSL configurations live in this package.
+        WirespecExtractor.extract(
+            ExtractConfig(
+                classesDirectories = thisModuleClassesDirs(),
+                runtimeClasspath = emptyList(),
+                outputDirectory = out,
+                basePackage = "community.flock.wirespec.extractor.fixtures.dsl",
+                log = log,
+            )
+        )
+
+        infos.single { it.startsWith("Found ") && it.contains(" functional-DSL configuration(s): ") } shouldContain
+            "MvcRouterConfig"
+        infos.single { it.startsWith("Found no ") } shouldBe
+            "Found no Spring controller(s), JAX-RS resource(s), Ktor routing configuration(s), Ktor client(s), " +
+            "GraphQL controller(s), messaging listener method(s), messaging producer method(s)"
+    }
+
+    @Test
+    fun `ClassCounter counts every compiled class under the base package`() {
+        val dir = thisModuleClassesDir()
+        val pkg = "community.flock.wirespec.extractor.fixtures.dto"
+        val onDisk = File(dir, pkg.replace('.', '/')).walk().count { it.isFile && it.extension == "class" }
+
+        ClassCounter.count(listOf(dir), pkg) shouldBe onDisk
+        ClassCounter.count(listOf(dir), null) shouldBeGreaterThan onDisk
+        ClassCounter.count(listOf(File(dir, "does-not-exist")), null) shouldBe 0
     }
 
     @Test

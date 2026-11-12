@@ -11,3 +11,6 @@ target/
 .DS_Store
 .vscode/
 out/
+
+# Kotlin 2.x compiler daemon session state
+.kotlin/
