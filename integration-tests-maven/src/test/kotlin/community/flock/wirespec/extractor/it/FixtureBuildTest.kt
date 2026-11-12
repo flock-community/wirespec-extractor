@@ -119,6 +119,7 @@ class FixtureBuildTest {
             "dsl-mvc-app"      -> DslFixtureVerifiers.verifyMvcApp(File(workDir, "target/wirespec"))
             "dsl-java-app"     -> DslFixtureVerifiers.verifyJavaApp(File(workDir, "target/wirespec"))
             "jaxrs-java-app"   -> verifyJaxRsJavaApp(workDir)
+            "jaxrs-provided-api-app" -> verifyJaxRsProvidedApiApp(workDir, result.stdout)
             "quarkus-java-app" -> verifyQuarkusJavaApp(workDir)
             "graphql-app"      -> GraphQlFixtureVerifier.verify(File(workDir, "target/wirespec"))
             "kafka-app"        -> KafkaFixtureVerifier.verify(File(workDir, "target/wirespec"))
@@ -291,6 +292,26 @@ class FixtureBuildTest {
 
         val resource = File(wsDir, "YoloResource.ws").readText()
         resource shouldMatch Regex("(?s).*endpoint Yolo GET /yolo\\s*->\\s*\\{\\s*200 -> String\\s*}.*")
+    }
+
+    /**
+     * The JAX-RS API is `provided`: the extractor must load it anyway. Without it, the resource
+     * returning a `Response` failed with a `NoClassDefFoundError`, and the one with only JDK types
+     * silently lost its annotations: neither produced a .ws file.
+     */
+    private fun verifyJaxRsProvidedApiApp(workDir: File, stdout: String) {
+        val wsDir = File(workDir, "target/wirespec")
+        assertTrue(wsDir.isDirectory) { "wirespec output dir missing at ${wsDir.absolutePath}" }
+        assertTrue("Skipping" !in stdout) { "The extractor skipped a class:\n$stdout" }
+
+        val files = wsDir.listFiles()!!.map { it.name }.sorted()
+        files.shouldContainExactly("GreetingResource.ws", "ReadinessResource.ws")
+
+        fun endpoint(signature: String, response: String) =
+            Regex("(?s).*" + Regex.escape("endpoint $signature -> {") + "\\s*" + Regex.escape(response) + "\\s*}.*")
+
+        File(wsDir, "GreetingResource.ws").readText() shouldMatch endpoint("Hello GET /hello", "200 -> String")
+        File(wsDir, "ReadinessResource.ws").readText() shouldMatch endpoint("Ready GET /ready", "200 -> String\n  503 -> String")
     }
 
     /**

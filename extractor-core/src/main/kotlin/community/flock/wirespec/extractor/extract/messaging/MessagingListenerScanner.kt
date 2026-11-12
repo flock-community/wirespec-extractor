@@ -1,5 +1,6 @@
 package community.flock.wirespec.extractor.extract.messaging
 
+import community.flock.wirespec.extractor.SkipWarnings
 import io.github.classgraph.ClassGraph
 import java.lang.reflect.Method
 
@@ -47,7 +48,7 @@ internal object MessagingListenerScanner {
                 .filter { ci -> basePackage == null || ci.name.startsWith("$basePackage.") || ci.name == basePackage }
             for (ci in classes) {
                 val cls = try { ci.loadClass() } catch (t: Throwable) {
-                    onWarn("messaging.${broker.id}.consumer: skipping ${ci.name}: ${t.message}")
+                    onWarn("messaging.${broker.id}.consumer: skipping ${ci.name}: ${SkipWarnings.cause(t)}")
                     continue
                 }
                 for (mi in ci.methodInfo) {
@@ -66,7 +67,7 @@ internal object MessagingListenerScanner {
                     .filter { ci -> basePackage == null || ci.name.startsWith("$basePackage.") || ci.name == basePackage }
                 for (ci in classLevel) {
                     val cls = try { ci.loadClass() } catch (t: Throwable) {
-                        onWarn("messaging.${broker.id}.consumer: skipping ${ci.name}: ${t.message}")
+                        onWarn("messaging.${broker.id}.consumer: skipping ${ci.name}: ${SkipWarnings.cause(t)}")
                         continue
                     }
                     for (mi in ci.methodInfo) {

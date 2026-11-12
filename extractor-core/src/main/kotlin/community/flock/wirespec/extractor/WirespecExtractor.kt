@@ -157,7 +157,7 @@ object WirespecExtractor {
                 } catch (e: WirespecExtractorException) {
                     throw e  // user-facing errors (e.g., generic-flattening) must fail the build
                 } catch (t: Throwable) {
-                    config.log.warn("Skipping ${c.name}: ${t.message}")
+                    config.log.warn(SkipWarnings.skipping("Spring controller", c.name, t))
                     emptyList()
                 }
                 c.simpleName to eps.map { it as Definition }
@@ -170,7 +170,7 @@ object WirespecExtractor {
                 } catch (e: WirespecExtractorException) {
                     throw e
                 } catch (t: Throwable) {
-                    config.log.warn("Skipping DSL ${cfg.name}: ${t.message}")
+                    config.log.warn(SkipWarnings.skipping("functional-DSL configuration", cfg.name, t, "its routes are missing from the contract"))
                     emptyList()
                 }
                 if (eps.isNotEmpty()) {
@@ -187,7 +187,7 @@ object WirespecExtractor {
                 } catch (e: WirespecExtractorException) {
                     throw e
                 } catch (t: Throwable) {
-                    config.log.warn("Skipping JAX-RS ${resource.name}: ${t.message}")
+                    config.log.warn(SkipWarnings.skipping("JAX-RS resource", resource.name, t))
                     emptyList()
                 }
                 if (eps.isNotEmpty()) {
@@ -204,7 +204,7 @@ object WirespecExtractor {
                 } catch (e: WirespecExtractorException) {
                     throw e
                 } catch (t: Throwable) {
-                    config.log.warn("Skipping Ktor routing ${cfg.name}: ${t.message}")
+                    config.log.warn(SkipWarnings.skipping("Ktor routing configuration", cfg.name, t, "its routes are missing from the contract"))
                     emptyList()
                 }
                 if (eps.isNotEmpty()) {
@@ -220,7 +220,7 @@ object WirespecExtractor {
                 } catch (e: WirespecExtractorException) {
                     throw e
                 } catch (t: Throwable) {
-                    config.log.warn("Skipping Ktor client ${clientClass.name}: ${t.message}")
+                    config.log.warn(SkipWarnings.skipping("Ktor client", clientClass.name, t, "its requests are missing from the contract"))
                     emptyList()
                 }
                 if (eps.isNotEmpty()) {
@@ -244,7 +244,7 @@ object WirespecExtractor {
                 } catch (e: WirespecExtractorException) {
                     throw e
                 } catch (t: Throwable) {
-                    config.log.warn("Skipping GraphQL ${controller.name}: ${t.message}")
+                    config.log.warn(SkipWarnings.skipping("GraphQL controller", controller.name, t, "its operations are missing from the contract"))
                     emptyList()
                 }
             }, emptyTypes = { types.definitions.filterIsInstance<WireType.Object>().filter { it.fields.isEmpty() }.mapTo(mutableSetOf()) { it.name } })
@@ -255,7 +255,7 @@ object WirespecExtractor {
                 } catch (e: WirespecExtractorException) {
                     throw e
                 } catch (t: Throwable) {
-                    config.log.warn("Skipping GraphQL fields from ${controller.name}: ${t.message}")
+                    config.log.warn(SkipWarnings.skipping("GraphQL fields of", controller.name, t, "they are missing from the contract"))
                     emptyList()
                 }
             }.map(schemaIds::field)
@@ -306,7 +306,7 @@ object WirespecExtractor {
                 } catch (e: WirespecExtractorException) {
                     throw e
                 } catch (t: Throwable) {
-                    config.log.warn("Skipping type ${def}: ${t.message}")
+                    config.log.warn(SkipWarnings.skipping("type", "$def", t, "it is missing from the contract"))
                     null
                 }
             }

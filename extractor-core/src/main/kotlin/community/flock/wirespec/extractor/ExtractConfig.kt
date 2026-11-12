@@ -9,7 +9,9 @@ import java.io.File
  *   to scan. Maven projects pass one (`target/classes`); Gradle JVM projects
  *   typically pass two (`build/classes/java/main`, `build/classes/kotlin/main`).
  * @property runtimeClasspath  Additional jars and directories needed so the
- *   class loader can resolve types referenced by scanned classes.
+ *   class loader can resolve types referenced by scanned classes. Pass the
+ *   compile classpath as well as the runtime one: a class whose signature
+ *   uses a compile-only (`provided`) type cannot be reflected on without it.
  * @property outputDirectory   Where `.ws` files will be written.
  * @property basePackage       Optional package prefix to restrict scanning;
  *   `null` or blank means scan every package.

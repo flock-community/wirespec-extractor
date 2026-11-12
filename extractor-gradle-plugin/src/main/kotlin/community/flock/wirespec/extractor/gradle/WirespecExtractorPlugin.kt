@@ -27,7 +27,7 @@ import org.gradle.jvm.tasks.Jar
  *   - Registers `wirespecExtractor { outputDir; basePackage }` extension.
  *   - When [JavaPlugin] is applied (Kotlin-JVM applies it under the hood),
  *     registers the `extractWirespec` task using `sourceSets.main` outputs
- *     and runtime classpath, and makes `assemble` depend on it so
+ *     plus compile and runtime classpaths, and makes `assemble` depend on it so
  *     `gradle build` always extracts.
  */
 class WirespecExtractorPlugin : Plugin<Project> {
@@ -50,7 +50,9 @@ class WirespecExtractorPlugin : Plugin<Project> {
                 t.group = "wirespec"
                 t.description = "Extract Wirespec .ws files from Spring controllers."
                 t.classesDirs.from(main.output.classesDirs)
-                t.runtimeClasspath.from(main.runtimeClasspath)
+                // compileOnly dependencies are not on the runtime classpath, but the scanned
+                // classes reference them: without them those classes fail to load.
+                t.runtimeClasspath.from(main.compileClasspath, main.runtimeClasspath)
                 t.outputDirectory.convention(ext.outputDir)
                 t.basePackage.convention(ext.basePackage)
                 t.extractSpring.convention(ext.extractSpring)

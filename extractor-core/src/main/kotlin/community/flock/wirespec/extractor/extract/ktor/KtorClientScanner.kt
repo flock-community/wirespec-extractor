@@ -1,5 +1,6 @@
 package community.flock.wirespec.extractor.extract.ktor
 
+import community.flock.wirespec.extractor.SkipWarnings
 import community.flock.wirespec.extractor.scan.isDeclaredType
 import io.github.classgraph.ClassGraph
 
@@ -48,7 +49,7 @@ internal object KtorClientScanner {
                 .mapNotNull { ci ->
                     try { ci.loadClass() }
                     catch (t: Throwable) {
-                        onWarn("Skipping Ktor client candidate ${ci.name}: ${t.message}")
+                        onWarn(SkipWarnings.skipping("Ktor client candidate", ci.name, t, "its requests are missing from the contract"))
                         null
                     }
                 }

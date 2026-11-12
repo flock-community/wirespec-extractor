@@ -1,5 +1,6 @@
 package community.flock.wirespec.extractor.extract.messaging
 
+import community.flock.wirespec.extractor.SkipWarnings
 import io.github.classgraph.ClassGraph
 import java.lang.reflect.ParameterizedType
 
@@ -64,7 +65,7 @@ internal object MessagingProducerScanner {
                 if (ci.fieldInfo.none { it.typeDescriptor?.toString() == templateFqn }) continue
 
                 val cls = try { ci.loadClass() } catch (t: Throwable) {
-                    onWarn("messaging.${broker.id}.producer: skipping ${ci.name}: ${t.message}")
+                    onWarn("messaging.${broker.id}.producer: skipping ${ci.name}: ${SkipWarnings.cause(t)}")
                     continue
                 }
                 for (field in cls.declaredFields) {

@@ -1,5 +1,6 @@
 package community.flock.wirespec.extractor.extract.ktor
 
+import community.flock.wirespec.extractor.SkipWarnings
 import community.flock.wirespec.extractor.extract.TypeExtractor
 import community.flock.wirespec.extractor.model.WireType
 
@@ -28,7 +29,7 @@ internal class KtorTypeResolver(
         return try {
             types.extract(cls)
         } catch (t: Throwable) {
-            onWarn("Could not extract Ktor body type ${cls.name}: ${t.message}")
+            onWarn("Could not extract Ktor body type ${cls.name}: ${SkipWarnings.cause(t)}")
             null
         }
     }
@@ -38,7 +39,7 @@ internal class KtorTypeResolver(
         return try {
             Class.forName(fqn, false, classLoader)
         } catch (t: Throwable) {
-            onWarn("Could not load Ktor type $fqn: ${t.message}")
+            onWarn("Could not load Ktor type $fqn: ${SkipWarnings.cause(t)}")
             null
         }
     }

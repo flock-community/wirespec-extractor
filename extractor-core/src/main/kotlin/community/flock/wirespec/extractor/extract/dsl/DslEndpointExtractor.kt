@@ -1,5 +1,6 @@
 package community.flock.wirespec.extractor.extract.dsl
 
+import community.flock.wirespec.extractor.SkipWarnings
 import community.flock.wirespec.extractor.extract.ApiResponseExtractor
 import community.flock.wirespec.extractor.extract.ReturnTypeUnwrapper
 import community.flock.wirespec.extractor.extract.TypeExtractor
@@ -120,7 +121,7 @@ internal class DslEndpointExtractor(
         val fqn = internalName.replace('/', '.')
         return try { Class.forName(fqn, false, classLoader) }
         catch (t: Throwable) {
-            onWarn("Could not load DSL handler class $fqn: ${t.message}")
+            onWarn("Could not load DSL handler class $fqn: ${SkipWarnings.cause(t)}")
             null
         }
     }
