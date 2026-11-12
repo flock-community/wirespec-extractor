@@ -1,16 +1,12 @@
 // src/main/kotlin/community/flock/wirespec/extractor/extract/ResponseEntityStatusScanner.kt
 package community.flock.wirespec.extractor.extract
 
-import org.objectweb.asm.ClassReader
 import org.objectweb.asm.Opcodes
-import org.objectweb.asm.Type
 import org.springframework.http.HttpStatus
-import org.objectweb.asm.tree.ClassNode
 import org.objectweb.asm.tree.FieldInsnNode
 import org.objectweb.asm.tree.IntInsnNode
 import org.objectweb.asm.tree.LdcInsnNode
 import org.objectweb.asm.tree.MethodInsnNode
-import org.objectweb.asm.tree.MethodNode
 import java.lang.reflect.Method
 
 /**
@@ -30,15 +26,12 @@ import java.lang.reflect.Method
  * A Kotlin `suspend` handler compiles its body into the same method (as a state
  * machine), so the `ResponseEntity` calls are visible here just as for a plain
  * method — unless the function is `open`, in which case the body moves to a
- * synthetic `$suspendImpl` that this scanner follows. See [suspendImplOf].
+ * synthetic `$suspendImpl` that this scanner follows. See [MethodBodies].
  */
 object ResponseEntityStatusScanner {
 
     private const val RESPONSE_ENTITY = "org/springframework/http/ResponseEntity"
     private const val HTTP_STATUS = "org/springframework/http/HttpStatus"
-
-    /** Suffix of the synthetic static method holding an `open` suspend function's body. */
-    private const val SUSPEND_IMPL_SUFFIX = "\$suspendImpl"
 
     /**
      * `ResponseEntity` static factory methods whose name implies a fixed status.
@@ -58,7 +51,7 @@ object ResponseEntityStatusScanner {
 
     /** The status set on the ResponseEntity built by [method], or null when absent/ambiguous. */
     fun scan(method: Method): Int? {
-        val node = methodNode(method) ?: return null
+        val node = MethodBodies.of(method)?.node ?: return null
 
         val found = LinkedHashSet<Int>()
         // The status-carrying value most recently pushed onto the stack. Reset
@@ -102,38 +95,4 @@ object ResponseEntityStatusScanner {
 
     private fun statusFromName(name: String?): Int? =
         name?.let { runCatching { HttpStatus.valueOf(it).value() }.getOrNull() }
-
-    private fun methodNode(method: Method): MethodNode? {
-        val loader = method.declaringClass.classLoader ?: return null
-        val internalName = Type.getInternalName(method.declaringClass)
-        val bytes = loader.getResourceAsStream("$internalName.class") ?: return null
-        val cn = ClassNode()
-        bytes.use { ClassReader(it).accept(cn, ClassReader.SKIP_FRAMES) }
-        val desc = Type.getMethodDescriptor(method)
-        val node = cn.methods.firstOrNull { it.name == method.name && it.desc == desc }
-            ?: cn.methods.firstOrNull { it.name == method.name }
-            ?: return null
-        return suspendImplOf(cn, node, internalName) ?: node
-    }
-
-    /**
-     * An `open` suspend function does not hold its own body: Kotlin moves the
-     * state machine into a synthetic static `<name>$suspendImpl` and leaves the
-     * open method as a bridge that just forwards to it. The `ResponseEntity`
-     * calls therefore live in `$suspendImpl`, not in the method matching the
-     * signature — so scanning the bridge finds nothing.
-     *
-     * Every Spring handler is affected once the `all-open` compiler plugin is on
-     * (`kotlin-spring`, i.e. effectively every Spring Boot Kotlin project), which
-     * opens `@RestController` classes and their members.
-     *
-     * Returns the `$suspendImpl` node when [node] is such a bridge, else null.
-     */
-    private fun suspendImplOf(cn: ClassNode, node: MethodNode, owner: String): MethodNode? {
-        val target = node.name + SUSPEND_IMPL_SUFFIX
-        val forwards = node.instructions.toArray().any {
-            it is MethodInsnNode && it.opcode == Opcodes.INVOKESTATIC && it.owner == owner && it.name == target
-        }
-        return if (forwards) cn.methods.firstOrNull { it.name == target } else null
-    }
 }

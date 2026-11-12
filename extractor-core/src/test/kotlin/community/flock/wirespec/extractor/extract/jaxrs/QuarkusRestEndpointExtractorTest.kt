@@ -73,8 +73,9 @@ class QuarkusRestEndpointExtractorTest {
     }
 
     @Test
-    fun `an untyped Response has no known body`() {
-        fruits.getValue("Delete").responses shouldBe listOf(Endpoint.Response(200, null))
+    fun `an untyped Response takes the status it is built with`() {
+        // Response.noContent().build()
+        fruits.getValue("Delete").responses shouldBe listOf(Endpoint.Response(204, null))
     }
 
     @Test

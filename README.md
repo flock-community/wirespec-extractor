@@ -551,9 +551,12 @@ swagger/OpenAPI annotations**:
   the method argument with no binding/injected (`@Context`, `@BeanParam`, …)
   annotation.
 - **Responses** are read by the same code path as annotated Spring controllers:
-  swagger `@ApiResponses` / `@ApiResponse` produce one Wirespec response per
-  declared status, falling back to the method signature otherwise. See
-  [Multiple responses](#multiple-responses).
+  swagger `@ApiResponses` / `@ApiResponse` (or MicroProfile OpenAPI
+  `@APIResponses` / `@APIResponse`) produce one Wirespec response per declared
+  status, falling back to the method otherwise. A method returning a
+  `Response` takes the statuses and entities it builds in its body. See
+  [Multiple responses](#multiple-responses) and
+  [Responses built in the method body](#responses-built-in-the-method-body).
 - **Operation name** is the swagger `@Operation(operationId = …)` when present
   (PascalCased), else the method name. `@Operation(hidden = true)` methods are
   skipped.
@@ -578,6 +581,57 @@ class UserResource {
 }
 ```
 
+#### Responses built in the method body
+
+A method returning an untyped `Response` hides its entity type, and no signature
+shows a status chosen in the body. The extractor reads both from the compiled
+method, so every status the method can return becomes a response:
+
+```java
+@GET
+@Produces(MediaType.TEXT_PLAIN)
+public Response ready() {
+    if (healthCheckService.isReady()) {
+        return Response.ok().entity("Ready\n").build();
+    }
+    return Response.status(Response.Status.SERVICE_UNAVAILABLE)
+            .entity("Not Ready\n")
+            .build();
+}
+```
+
+```
+endpoint Ready GET /ready -> {
+  200 -> String
+  503 -> String
+}
+```
+
+- **Status** comes from the factory — `ok` (200), `created` (201), `accepted`
+  (202), `noContent` (204), `seeOther` (303), `notModified` (304),
+  `temporaryRedirect` (307), `notFound` (404), `notAcceptable` (406),
+  `serverError` (500) — or from `status(…)` given an `int` constant, a
+  `Response.Status` constant, `Status.X.getStatusCode()` or
+  `Status.fromStatusCode(<int>)`. The same factories on Quarkus `RestResponse`
+  and `RestResponse.ResponseBuilder` (including `create(…)` and
+  `RestResponse.Status` / `RestResponse.StatusCode`) are read too.
+- **Body** is the type of the entity given to `ok(x)`, `accepted(x)`,
+  `entity(x)` or `status(s, x)`: the static type the compiled code gives it — a
+  `String` constant, a parameter, a field, a call's generic return type, a cast,
+  or the type argument of a `GenericEntity<T>` subclass. No entity means no
+  body. Entities of different types for one status, or of a type the code does
+  not reveal, are `Any`. A typed `RestResponse<T>` always carries a `T`.
+- The builder is followed through locals, branches and ternaries, and through
+  Kotlin `?.let { … } ?:`, `when` and `suspend` functions.
+- **Explicit annotations win.** A Quarkus `@ResponseStatus` sets the only
+  status. `@ApiResponse` / `@APIResponse` replace the inferred responses; an
+  inferred body still backs a declared status that has no content of its own.
+- What the body does not show is not guessed: a response built by a helper
+  method, inside a lambda (`Uni<Response>`), or with a status computed at run
+  time is left out. When nothing is readable, an untyped `Response` is a
+  body-less `200` and the build logs a warning naming the method — declare its
+  responses with `@ApiResponse` / `@APIResponse`.
+
 Routing annotations are **inherited**: a resource method with no HTTP-method
 annotation of its own takes them — and the parameter annotations — from the
 superclass or interface method it overrides, so a `@Path` class implementing an
@@ -598,12 +652,15 @@ same way:
   `RoutingContext`, …) are never the request entity, with or without `@Context`.
 - `Uni<T>`, `CompletionStage<T>` and `RestResponse<T>` are unwrapped to `T`;
   `Multi<T>` becomes `T[]`. `@ResponseStatus` sets the response status.
-- An untyped `Response` hides its entity type, so it is emitted as a body-less
-  `200`. Declare the real shape with swagger `@ApiResponse`.
+- An untyped `Response` takes the statuses and entities it is built with — see
+  [Responses built in the method body](#responses-built-in-the-method-body).
 
-MicroProfile OpenAPI annotations (`org.eclipse.microprofile.openapi`, the ones
-`quarkus-smallrye-openapi` uses) are not read — only the swagger
-`io.swagger.v3.oas` annotations are.
+MicroProfile OpenAPI `@APIResponses` / `@APIResponse`
+(`org.eclipse.microprofile.openapi`, the ones `quarkus-smallrye-openapi` uses)
+are read like swagger's: one response per `responseCode`, the body from the
+first `content` entry's `schema.implementation` (a list when the schema's `type`
+is `ARRAY`). Where both declare a status, swagger's wins. Other MicroProfile
+annotations are not read.
 
 JAX-RS annotations are read reflectively by fully-qualified name, so — like the
 messaging scanners — the extractor needs no JAX-RS API on its own classpath and

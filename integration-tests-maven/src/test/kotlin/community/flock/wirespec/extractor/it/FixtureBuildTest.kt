@@ -290,14 +290,15 @@ class FixtureBuildTest {
 
     /**
      * A real Quarkus build (`quarkus-maven-plugin` + `quarkus-rest-jackson`) whose resources use
-     * the Quarkus REST idioms: `@Rest*` shorthands, bare path parameters, Mutiny, `RestResponse`.
+     * the Quarkus REST idioms: `@Rest*` shorthands, bare path parameters, Mutiny, `RestResponse`,
+     * and untyped `Response`s whose status and entity are set in the method body.
      */
     private fun verifyQuarkusJavaApp(workDir: File) {
         val wsDir = File(workDir, "target/wirespec")
         assertTrue(wsDir.isDirectory) { "wirespec output dir missing at ${wsDir.absolutePath}" }
 
         val files = wsDir.listFiles()!!.map { it.name }.sorted()
-        files.shouldContainExactly("BasketResource.ws", "FruitResource.ws", "types.ws")
+        files.shouldContainExactly("BasketResource.ws", "FruitResource.ws", "ReadinessEndpoint.ws", "types.ws")
 
         fun endpoint(signature: String, response: String) =
             Regex("(?s).*" + Regex.escape("endpoint $signature -> {") + "\\s*" + Regex.escape(response) + "\\s*}.*")
@@ -313,8 +314,14 @@ class FixtureBuildTest {
         // RestResponse<T> is unwrapped and @ResponseStatus sets the status.
         fruits shouldMatch endpoint("Create POST Fruit /fruits", "201 -> Fruit")
         fruits shouldMatch endpoint("Update PUT Fruit /fruits/{name: String}", "200 -> Fruit")
-        // An untyped Response carries no body type.
-        fruits shouldMatch endpoint("Delete DELETE /fruits/{name: String}", "200 -> Unit")
+        // An untyped Response takes the status it is built with: Response.noContent().build().
+        fruits shouldMatch endpoint("Delete DELETE /fruits/{name: String}", "204 -> Unit")
+        // Built by a helper, so declared with MicroProfile OpenAPI @APIResponse instead.
+        fruits shouldMatch endpoint("Stock GET /fruits/{name: String}/stock", "200 -> Integer32\n  404 -> Unit")
+
+        // Every status the body builds and returns, each with its entity's type.
+        val readiness = File(wsDir, "ReadinessEndpoint.ws").readText()
+        readiness shouldMatch endpoint("Ready GET /ready", "200 -> String\n  503 -> String")
 
         // Routing annotations inherited from the interface the resource implements.
         val baskets = File(wsDir, "BasketResource.ws").readText()

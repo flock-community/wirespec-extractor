@@ -3,6 +3,7 @@ package community.flock.wirespec.extractor
 import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldMatch
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
@@ -60,6 +61,32 @@ class JaxRsExtractionTest {
         val ws = result.filesWritten.single { it.name == "SomeApi.ws" }.readText()
         ws shouldContain "endpoint GetSome GET /api"
         ws shouldContain "UserDto"
+    }
+
+    /** Issue #57: the statuses and entities an untyped `Response` is built with reach the contract. */
+    @Test
+    fun `emits the responses a JAX-RS resource builds in its body`(@TempDir tmp: Path) {
+        val probe = community.flock.wirespec.extractor.fixtures.jaxrs.built.ReadinessEndpoint::class.java
+        val warnings = mutableListOf<String>()
+        val result = WirespecExtractor.extract(
+            ExtractConfig(
+                classesDirectories = listOf(File(probe.protectionDomain.codeSource.location.toURI())),
+                runtimeClasspath = emptyList(),
+                outputDirectory = File(tmp.toFile(), "ws").apply { mkdirs() },
+                basePackage = probe.packageName,
+                log = object : ExtractLog {
+                    override fun info(msg: String) {}
+                    override fun warn(msg: String) { warnings += msg }
+                },
+            )
+        )
+
+        val ws = result.filesWritten.single { it.name == "ReadinessEndpoint.ws" }.readText()
+        ws shouldMatch Regex("(?s).*endpoint Ready GET /ready -> \\{\\s*200 -> String\\s*503 -> String\\s*}.*")
+
+        // Only the methods whose responses cannot be read from the body are warned about.
+        warnings.filter { "Could not read the responses" in it }.map { it.substringAfter('#').substringBefore(' ') }
+            .toSet() shouldBe setOf("dynamic", "delegated", "async")
     }
 
     @Test
