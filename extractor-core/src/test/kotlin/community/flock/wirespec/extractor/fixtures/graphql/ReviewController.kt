@@ -18,7 +18,7 @@ data class Shelf(val name: String)
 @Controller
 class ReviewController {
 
-    /** A field of `Book` with arguments, kept as `@GraphQLArgument`s on the field. */
+    /** A field of `Book` with arguments: an rpc that names `Book`. */
     @SchemaMapping(typeName = "Book")
     fun reviews(book: Book, @Argument first: Long, @Argument filter: ReviewFilter?, @Argument shelf: Shelf?): List<Review> =
         emptyList()

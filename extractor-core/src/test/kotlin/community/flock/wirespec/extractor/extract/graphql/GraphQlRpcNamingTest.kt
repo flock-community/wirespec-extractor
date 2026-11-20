@@ -33,6 +33,19 @@ class GraphQlRpcNamingTest {
     }
 
     @Test
+    fun `a field with arguments of a type is named after the type and the field`() {
+        val reviews = Rpc("Controller", "reviews", Kind.QUERY, emptyList(), null, parentTypeName = "Book", ofDataType = true)
+        names(reviews, rpc("reviews")) shouldBe listOf("BookReviews", "Reviews")
+        names(reviews, types = setOf("BookReviews")) shouldBe listOf("BookReviews2")
+    }
+
+    @Test
+    fun `a name taken by an rpc of a namespace takes the namespace as prefix`() {
+        val inbox = Rpc("Controller", "inbox", Kind.QUERY, emptyList(), null, parentTypeName = "NotificationsQuery")
+        names(rpc("inbox"), inbox) shouldBe listOf("Inbox", "NotificationsQueryInbox")
+    }
+
+    @Test
     fun `a reserved or invalid name takes the root type as prefix`() {
         names(rpc("string"), rpc("_service")) shouldBe listOf("QueryString", "Service")
         names(rpc("__typename")) shouldBe listOf("Typename")

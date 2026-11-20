@@ -20,6 +20,7 @@ import community.flock.wirespec.extractor.model.Endpoint
 import community.flock.wirespec.extractor.model.Endpoint.HttpMethod
 import community.flock.wirespec.extractor.model.Endpoint.PathSegment
 import community.flock.wirespec.extractor.model.GraphQlField
+import community.flock.wirespec.extractor.model.GraphQlNesting
 import community.flock.wirespec.extractor.model.Param
 import community.flock.wirespec.extractor.model.Rpc
 import community.flock.wirespec.extractor.model.WireType
@@ -57,18 +58,20 @@ class WirespecAstBuilder {
     )
 
     /**
-     * An RPC, annotated the way Wirespec's GraphQL converter (wirespec PR #710) does: with its
-     * operation type — `@GraphQLQuery`, `@GraphQLMutation`, or `@GraphQLSubscription` — and with
-     * `@GraphQLName` always, so the original field name is never lost.
+     * An RPC, annotated the way Wirespec's GraphQL converter (Wirespec 0.23.10) does: with its
+     * operation type — `@GraphQLQuery`, `@GraphQLMutation`, or `@GraphQLSubscription` — naming
+     * the type it is a field of when that is not the root type (`@GraphQLQuery("LibraryQuery")`,
+     * `@GraphQLQuery("Book")`), and with `@GraphQLName` always, so the original field name is
+     * never lost.
      */
     fun toRpc(r: Rpc): WsRpc = WsRpc(
         comment = null,
         annotations = listOf(
             Annotation(
-                "GraphQL${r.kind.typeName}",
+                r.kind.annotationName,
                 listOfNotNull(
-                    Annotation.Parameter("default", Annotation.Value.Single(r.rootTypeName))
-                        .takeIf { r.rootTypeName != r.kind.typeName },
+                    Annotation.Parameter("default", Annotation.Value.Single(r.parentTypeName))
+                        .takeIf { r.parentTypeName != r.kind.typeName },
                 ),
             ),
             Annotation("GraphQLName", listOf(Annotation.Parameter("default", Annotation.Value.Single(r.field)))),
@@ -80,26 +83,17 @@ class WirespecAstBuilder {
     )
 
     /**
-     * A GraphQL object type holding fields resolved by non-root `@SchemaMapping`s. Their
-     * arguments are written as `@GraphQLArgument(name: …, type: …)`, the type in GraphQL
-     * syntax with input objects under their GraphQL input name from [inputNames].
+     * A GraphQL object type holding the fields without arguments that `@SchemaMapping`s
+     * resolve on it. Its fields with arguments are RPCs that name it, so it may be empty.
      */
-    fun toGraphQlType(name: String, fields: List<GraphQlField>, inputNames: Map<String, String> = emptyMap()): WsType = WsType(
+    fun toGraphQlType(name: String, fields: List<GraphQlField>): WsType = WsType(
         comment = null,
         annotations = emptyList(),
         identifier = DefinitionIdentifier(name),
         shape = Shape(
             fields.map { field ->
                 WsField(
-                    annotations = field.arguments.map { argument ->
-                        Annotation(
-                            "GraphQLArgument",
-                            listOf(
-                                Annotation.Parameter("name", Annotation.Value.Single(argument.name)),
-                                Annotation.Parameter("type", Annotation.Value.Single(argument.type.toGraphQlType(inputNames))),
-                            ),
-                        )
-                    },
+                    annotations = emptyList(),
                     identifier = FieldIdentifier(field.field),
                     reference = field.result?.let(::toReference) ?: Reference.Unit(false),
                 )
@@ -107,6 +101,34 @@ class WirespecAstBuilder {
         ),
         extends = emptyList(),
     )
+
+    /**
+     * The `@file:` annotations that nest operation namespaces, the way Wirespec's GraphQL
+     * converter (Wirespec 0.23.10) writes them: one for every type with fields that lead to
+     * a namespace, naming the type and those fields, each with the GraphQL type it returns.
+     *
+     * ```wirespec
+     * @file:GraphQLQuery("Query", path: { library: "LibraryQuery!" })
+     * ```
+     */
+    fun toFileAnnotations(path: List<GraphQlNesting>): List<Annotation> = path
+        .groupBy { it.kind to it.parentTypeName }
+        .map { (parent, fields) ->
+            val (kind, parentTypeName) = parent
+            Annotation(
+                kind.annotationName,
+                listOf(
+                    Annotation.Parameter("default", Annotation.Value.Single(parentTypeName)),
+                    Annotation.Parameter(
+                        "path",
+                        Annotation.Value.Dict(fields.map { Annotation.Parameter(it.field, Annotation.Value.Single(it.graphQlType())) }),
+                    ),
+                ),
+            )
+        }
+
+    /** The GraphQL type a field of a path returns: the namespace object itself, never a list. */
+    private fun GraphQlNesting.graphQlType(): String = if (nullable) typeName else "$typeName!"
 
     fun toDefinition(wt: WireType): Definition = when (wt) {
         is WireType.Object -> WsType(
@@ -219,41 +241,13 @@ class WirespecAstBuilder {
         reference = toReference(type),
     )
 
-    /**
-     * The GraphQL type of an argument, mapped as Wirespec's GraphQL converter maps a
-     * reference: any `Integer` is an `Int` and any `Number` a `Float`, `Bytes` go as a
-     * `String`, and `Any` and dictionaries become the `JSON` scalar.
-     */
-    private fun WireType.toGraphQlType(inputNames: Map<String, String>): String {
-        val base = when (this) {
-            is WireType.Any -> "JSON"
-            is WireType.Primitive -> when (kind) {
-                WireType.Primitive.Kind.STRING,
-                WireType.Primitive.Kind.BYTES,
-                -> "String"
-                WireType.Primitive.Kind.INTEGER_32,
-                WireType.Primitive.Kind.INTEGER_64,
-                -> "Int"
-                WireType.Primitive.Kind.NUMBER_32,
-                WireType.Primitive.Kind.NUMBER_64,
-                -> "Float"
-                WireType.Primitive.Kind.BOOLEAN -> "Boolean"
-            }
-            is WireType.Ref -> inputNames[name] ?: name
-            is WireType.ListOf -> "[${element.toGraphQlType(inputNames)}]"
-            is WireType.MapOf -> "JSON"
-            is WireType.Object -> inputNames[name] ?: name
-            is WireType.EnumDef -> name
-            is WireType.Refined -> name
-        }
-        return if (nullable) base else "$base!"
-    }
-
     private fun Param.toField(): WsField = WsField(
         annotations = emptyList(),
         identifier = FieldIdentifier(name),
         reference = toReference(type),
     )
+
+    private val Rpc.Kind.annotationName: String get() = "GraphQL$typeName"
 
     private fun HttpMethod.toWs(): WsEndpoint.Method = when (this) {
         HttpMethod.GET     -> WsEndpoint.Method.GET
