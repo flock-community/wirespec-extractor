@@ -17,6 +17,7 @@ import community.flock.wirespec.extractor.extract.dsl.DslBytecodeWalker
 import community.flock.wirespec.extractor.extract.dsl.DslEndpointExtractor
 import community.flock.wirespec.extractor.extract.dsl.DslRouteScanner
 import community.flock.wirespec.extractor.extract.graphql.GraphQlInputs
+import community.flock.wirespec.extractor.extract.graphql.GraphQlNamespaces
 import community.flock.wirespec.extractor.extract.graphql.GraphQlRpcExtractor
 import community.flock.wirespec.extractor.extract.graphql.GraphQlRpcNaming
 import community.flock.wirespec.extractor.extract.graphql.GraphQlScanner
@@ -32,7 +33,6 @@ import community.flock.wirespec.extractor.extract.messaging.MessagingChannelExtr
 import community.flock.wirespec.extractor.extract.messaging.MessagingListenerScanner
 import community.flock.wirespec.extractor.extract.messaging.MessagingProducerScanner
 import community.flock.wirespec.extractor.extract.messaging.MessagingProducerWalker
-import community.flock.wirespec.extractor.model.Rpc
 import community.flock.wirespec.extractor.model.WireType
 import community.flock.wirespec.extractor.ownership.TypeOwnership
 import community.flock.wirespec.extractor.scan.ClassCounter
@@ -237,18 +237,22 @@ object WirespecExtractor {
                 onInfo = { msg -> config.log.info(msg) },
                 onWarn = { msg -> config.log.warn(msg) },
             )
-            // Extracted here, named and added once every type is known (see below).
-            val extractedRpcs = linkNamespaces(graphQlControllers.flatMap { controller ->
-                try {
-                    graphQlRpcs.extract(controller)
-                } catch (e: WirespecExtractorException) {
-                    throw e
-                } catch (t: Throwable) {
-                    config.log.warn(SkipWarnings.skipping("GraphQL controller", controller.name, t, "its operations are missing from the contract"))
-                    emptyList()
-                }
-            }, emptyTypes = { types.definitions.filterIsInstance<WireType.Object>().filter { it.fields.isEmpty() }.mapTo(mutableSetOf()) { it.name } })
-                .map(schemaIds::rpc)
+            // Extracted here, named and added once every type is known (see below). A field
+            // that only opens an operation namespace is no rpc: the file header nests it.
+            val graphQlNamespaces = GraphQlNamespaces.of(
+                graphQlControllers.flatMap { controller ->
+                    try {
+                        graphQlRpcs.extract(controller)
+                    } catch (e: WirespecExtractorException) {
+                        throw e
+                    } catch (t: Throwable) {
+                        config.log.warn(SkipWarnings.skipping("GraphQL controller", controller.name, t, "its operations are missing from the contract"))
+                        emptyList()
+                    }
+                },
+                emptyTypes = { types.definitions.filterIsInstance<WireType.Object>().filter { it.fields.isEmpty() }.mapTo(mutableSetOf()) { it.name } },
+            )
+            val extractedRpcs = graphQlNamespaces.operations.map(schemaIds::rpc)
             val extractedGraphQlFields = graphQlControllers.flatMap { controller ->
                 try {
                     graphQlRpcs.extractFields(controller)
@@ -317,10 +321,12 @@ object WirespecExtractor {
                 rpcs = extractedRpcs,
                 fields = extractedGraphQlFields,
             )
-            val graphQlTypes = extractedGraphQlFields
-                .groupBy { it.parentTypeName }
-                .map { (typeName, fields) -> builder.toGraphQlType(typeName, fields.distinctBy { it.field }, graphQlInputs.inputNames) }
-                .plus(namespaceTypeNames(extractedRpcs).map { builder.toGraphQlType(it, emptyList()) })
+            // Every type a field is resolved on, also one whose fields all take arguments: those
+            // are rpcs that name the type, which must exist for them to be its fields.
+            val graphQlFieldsByType = extractedGraphQlFields.groupBy { it.parentTypeName }
+            val graphQlTypes = (graphQlFieldsByType.keys + extractedRpcs.filter { it.ofDataType }.map { it.parentTypeName })
+                .distinct()
+                .map { typeName -> builder.toGraphQlType(typeName, graphQlFieldsByType[typeName].orEmpty().distinctBy { it.field }) }
             val allTypes = mergeGraphQlTypes(extractedTypes, graphQlTypes).map { definition ->
                 if (definition is WsType && definition.identifier.value in graphQlInputs.inputOnly) {
                     definition.copy(annotations = definition.annotations + Annotation("GraphQLInput", emptyList()))
@@ -334,6 +340,11 @@ object WirespecExtractor {
                 val key = rpc.ownerSimpleName
                 byController[key] = byController[key].orEmpty() + (builder.toRpc(rpc) as Definition)
             }
+            // The header of each file names the fields that lead to the namespaces of its rpcs.
+            val fileAnnotations = extractedRpcs
+                .groupBy { it.ownerSimpleName }
+                .mapValues { (_, rpcs) -> builder.toFileAnnotations(graphQlNamespaces.path(rpcs)) }
+                .filterValues { it.isNotEmpty() }
 
             val byControllerFinal = byController.filterValues { it.isNotEmpty() }
             val extracted = byControllerFinal.values.flatten()
@@ -354,6 +365,7 @@ object WirespecExtractor {
                 outputDir = config.outputDirectory,
                 controllerDefinitions = partition.perController,
                 sharedTypes = partition.shared,
+                fileAnnotations = fileAnnotations,
             )
             config.log.info(
                 "Wrote ${partition.perController.size + (if (partition.shared.isEmpty()) 0 else 1)} .ws file(s) to ${config.outputDirectory.absolutePath}"
@@ -402,33 +414,6 @@ internal fun detectControllerCollisions(controllers: List<Class<*>>): Map<String
         .mapValues { (_, classes) -> classes.map { it.name } }
 
 /** Normalises the raw `basePackage` parameter: blank or null becomes null. */
-/**
- * A root field that only opens a namespace (`library(): Namespace`) has no result of its own;
- * the namespace is the `<Field><Root>` type (`LibraryQuery`) that other operations hang off.
- * The field returns that type so the schema can reach it from the root.
- */
-internal fun linkNamespaces(rpcs: List<Rpc>, emptyTypes: () -> Set<String>): List<Rpc> {
-    val declared = rpcs.map { it.rootTypeName }.toSet()
-    val empty by lazy(emptyTypes)
-    fun opensNamespace(result: WireType?) = result == null || (result is WireType.Ref && result.name in empty)
-    return rpcs.map { rpc ->
-        val namespace = rpc.name + rpc.kind.typeName
-        if (opensNamespace(rpc.result) && rpc.rootTypeName == rpc.kind.typeName && namespace in declared) {
-            rpc.copy(result = WireType.Ref(namespace))
-        } else rpc
-    }
-}
-
-/** The namespace types [linkNamespaces] pointed root fields at; they need a declaration to be reachable. */
-internal fun namespaceTypeNames(rpcs: List<Rpc>): List<String> {
-    val declared = rpcs.map { it.rootTypeName }.toSet()
-    return rpcs
-        .filter { it.rootTypeName == it.kind.typeName }
-        .mapNotNull { (it.result as? WireType.Ref)?.name }
-        .filter { it in declared }
-        .distinct()
-}
-
 internal fun effectiveBasePackage(raw: String?): String? = raw?.takeIf { it.isNotBlank() }
 
 private fun mergeGraphQlTypes(

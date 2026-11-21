@@ -15,45 +15,69 @@ import java.lang.reflect.ParameterizedType
 import java.lang.reflect.Type
 
 /**
- * Turns a Spring for GraphQL controller into root [Rpc] operations and non-root
- * [GraphQlField] resolvers.
+ * Turns a Spring for GraphQL controller into [Rpc]s and [GraphQlField] resolvers.
  *
  * Every mapping annotation is read as its merged `@SchemaMapping` — `@QueryMapping` is
  * `@SchemaMapping(typeName = "Query")` and so on — which keeps composed annotations and
- * the class-level `typeName` default working. Mappings on any other type become fields
- * on that GraphQL object (`@SchemaMapping(typeName = "Book") fun author(book: Book)`).
- * Annotations are matched by fully-qualified name, so Spring for GraphQL need not be on
- * the extractor's own classpath.
+ * the class-level `typeName` default working. A mapping on a root type, or on an operation
+ * namespace whose name ends in one (`LibraryQuery`), is an operation. A mapping on any
+ * other type is a field of that GraphQL object: one with arguments is a function, and so
+ * an [Rpc] that names the type, the way Wirespec's GraphQL converter (Wirespec 0.23.10)
+ * writes it; one without, `@SchemaMapping(typeName = "Book") fun author(book: Book)`, is a
+ * [GraphQlField]. Annotations are matched by fully-qualified name, so Spring for GraphQL
+ * need not be on the extractor's own classpath.
  */
 internal class GraphQlRpcExtractor(
     private val types: TypeExtractor,
     private val onWarn: (String) -> Unit = {},
 ) {
 
-    fun extract(controller: Class<*>): List<Rpc> {
-        return mappedMethods(controller).mapNotNull { (method, typeName) ->
-            val kind = operationKind(typeName) ?: return@mapNotNull null
-            Rpc(
-                ownerSimpleName = controller.simpleName,
-                field = fieldName(method),
-                kind = kind,
-                rootTypeName = typeName,
-                arguments = method.parameters.indices.flatMap { argumentFields(method, it) },
-                result = result(method, kind),
-            )
+    /** The operations of [controller], and the fields with arguments it resolves on types that hold data. */
+    fun extract(controller: Class<*>): List<Rpc> =
+        mappedMethods(controller).mapNotNull { (method, typeName) ->
+            when (val kind = operationKind(typeName)) {
+                null -> if (takesArguments(method)) {
+                    Rpc(
+                        ownerSimpleName = controller.simpleName,
+                        field = fieldName(method),
+                        kind = Rpc.Kind.QUERY,
+                        parentTypeName = typeName,
+                        ofDataType = true,
+                        arguments = arguments(method),
+                        result = result(method),
+                    )
+                } else null
+                else -> Rpc(
+                    ownerSimpleName = controller.simpleName,
+                    field = fieldName(method),
+                    kind = kind,
+                    parentTypeName = typeName,
+                    arguments = arguments(method),
+                    result = result(method, kind),
+                )
+            }
         }
-    }
 
+    /** The fields without arguments [controller] resolves on types that hold data. */
     fun extractFields(controller: Class<*>): List<GraphQlField> =
         mappedMethods(controller).mapNotNull { (method, typeName) ->
-            if (operationKind(typeName) != null) return@mapNotNull null
+            if (operationKind(typeName) != null || takesArguments(method)) return@mapNotNull null
             GraphQlField(
                 parentTypeName = typeName,
                 field = fieldName(method),
-                arguments = method.parameters.indices.flatMap { argumentFields(method, it) },
                 result = result(method),
             )
         }
+
+    /**
+     * Whether [method] binds a GraphQL argument, decided from its annotations alone, so
+     * [extract] and [extractFields] agree on it without extracting the arguments twice.
+     */
+    private fun takesArguments(method: Method): Boolean =
+        method.parameters.any { attributes(it, ARGUMENT) != null || attributes(it, ARGUMENTS) != null }
+
+    private fun arguments(method: Method): List<WireType.Field> =
+        method.parameters.indices.flatMap { argumentFields(method, it) }
 
     private fun operationKind(typeName: String): Rpc.Kind? =
         Rpc.Kind.of(typeName)

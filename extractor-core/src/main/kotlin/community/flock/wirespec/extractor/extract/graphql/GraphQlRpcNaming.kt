@@ -3,11 +3,13 @@ package community.flock.wirespec.extractor.extract.graphql
 import community.flock.wirespec.extractor.model.Rpc
 
 /**
- * Names RPCs the way Wirespec's GraphQL converter does (wirespec PR #710), so the extracted
- * spec reads back as the same schema: an RPC is named after its field (`addTodo` becomes
- * `AddTodo`) and only takes its root type as prefix when that name is not a usable type name
- * or is already taken — by a type (`type Book` for a field `book` gives `QueryBook`) or by an
- * earlier RPC. A name still taken after that gets a numeric suffix.
+ * Names RPCs the way Wirespec's GraphQL converter does (Wirespec 0.23.10), so the extracted
+ * spec reads back as the same schema. An operation is named after its field (`addTodo`
+ * becomes `AddTodo`) and only takes its parent type as prefix when that name is not a
+ * usable type name or is already taken — by a type (`type Book` for a field `book` gives
+ * `QueryBook`) or by an earlier RPC. A field with arguments of a type that holds data is
+ * always named after the type and the field: `Book.reviews` is `BookReviews`. A name still
+ * taken after that gets a numeric suffix.
  */
 internal object GraphQlRpcNaming {
 
@@ -23,10 +25,10 @@ internal object GraphQlRpcNaming {
         val taken = typeNames.toMutableSet()
         return rpcs.map { rpc ->
             val candidate = rpc.field.trimStart('_').replaceFirstChar(Char::uppercase)
-            val base = if (TYPE_NAME.matches(candidate) && candidate !in RESERVED && candidate !in taken) {
+            val base = if (!rpc.ofDataType && TYPE_NAME.matches(candidate) && candidate !in RESERVED && candidate !in taken) {
                 candidate
             } else {
-                rpc.rootTypeName + candidate
+                rpc.parentTypeName + candidate
             }
             val name = (sequenceOf(base) + generateSequence(2) { it + 1 }.map { "$base$it" })
                 .first { it !in taken }

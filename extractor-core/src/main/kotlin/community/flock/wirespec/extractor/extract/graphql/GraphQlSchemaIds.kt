@@ -16,11 +16,12 @@ import io.github.classgraph.ClassGraph
  * input field the schema types as `ID` is retyped to Wirespec's `@GraphQLBuiltIn type ID =
  * String` — the shape Wirespec's GraphQL converter reads an `ID` into and writes back out.
  *
- * Fields are matched by GraphQL type and field name: root operations by their root type
- * (`Query`, a namespace such as `LibraryQuery`, …), schema-mapped fields by their parent
- * type, and object types by the extracted type's name — which is the GraphQL type's name
- * for types generated from the schema. Only a scalar the JVM type agrees with (a string or
- * integer, through the same list nesting) is retyped; anything else is left as extracted.
+ * Fields are matched by GraphQL type and field name: RPCs by their parent type (`Query`, a
+ * namespace such as `LibraryQuery`, a type such as `Book` for a field with arguments, …),
+ * the other schema-mapped fields by theirs, and object types by the extracted type's
+ * name — which is the GraphQL type's name for types generated from the schema. Only a
+ * scalar the JVM type agrees with (a string or integer, through the same list nesting) is
+ * retyped; anything else is left as extracted.
  */
 internal class GraphQlSchemaIds private constructor(
     private val fields: Map<String, Map<String, GraphQlSdl.TypeRef>>,
@@ -36,12 +37,11 @@ internal class GraphQlSchemaIds private constructor(
         get() = if (used) WireType.Refined(idName, WireType.Primitive(WireType.Primitive.Kind.STRING), builtIn = true) else null
 
     fun rpc(rpc: Rpc): Rpc = rpc.copy(
-        arguments = arguments(rpc.rootTypeName, rpc.field, rpc.arguments),
-        result = rpc.result?.let { retype(it, fields[rpc.rootTypeName]?.get(rpc.field)) },
+        arguments = arguments(rpc.parentTypeName, rpc.field, rpc.arguments),
+        result = rpc.result?.let { retype(it, fields[rpc.parentTypeName]?.get(rpc.field)) },
     )
 
     fun field(field: GraphQlField): GraphQlField = field.copy(
-        arguments = arguments(field.parentTypeName, field.field, field.arguments),
         result = field.result?.let { retype(it, fields[field.parentTypeName]?.get(field.field)) },
     )
 

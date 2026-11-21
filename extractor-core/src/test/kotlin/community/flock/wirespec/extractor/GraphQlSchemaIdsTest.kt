@@ -45,8 +45,7 @@ class GraphQlSchemaIdsTest {
         ws shouldContain "type AuthorInput {\n  name: String,\n  mentorId: ID?"
         ws shouldContain "type Book {\n  isbn: ID,\n  title: String"
         // A field resolver's arguments, from a type extension.
-        ws shouldContain "@GraphQLArgument(name: \"after\", type: \"ID\")"
-        ws shouldContain "@GraphQLArgument(name: \"first\", type: \"Int\")"
+        ws shouldContain "@GraphQLQuery(\"Author\")\n@GraphQLName(\"books\")\nrpc AuthorBooks {\n  after: ID?,\n  first: Integer32?\n} -> Book[]"
         // Declared once, as Wirespec's GraphQL converter reads the built-in back.
         ws shouldContain "@GraphQLBuiltIn\ntype ID = String"
     }

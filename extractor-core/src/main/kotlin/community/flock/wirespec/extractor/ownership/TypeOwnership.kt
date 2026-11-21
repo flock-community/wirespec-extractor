@@ -1,6 +1,5 @@
 package community.flock.wirespec.extractor.ownership
 
-import community.flock.wirespec.compiler.core.parse.ast.Annotation
 import community.flock.wirespec.compiler.core.parse.ast.Channel as WsChannel
 import community.flock.wirespec.compiler.core.parse.ast.Definition
 import community.flock.wirespec.compiler.core.parse.ast.Endpoint as WsEndpoint
@@ -141,26 +140,13 @@ internal object TypeOwnership {
         return out
     }
 
-    /**
-     * Names of every `Reference.Custom` reachable from a Type's shape fields and extends list,
-     * plus the types a GraphQL field argument takes — those are only named in the GraphQL type
-     * of its `@GraphQLArgument(type: …)`, so the input type stays with the type that takes it.
-     */
+    /** Names of every `Reference.Custom` reachable from a Type's shape fields and extends list. */
     internal fun customNamesIn(type: WsType): Set<String> {
         val out = linkedSetOf<String>()
-        type.shape.fieldEntries().forEach { f ->
-            out += customNamesIn(f.reference).toList()
-            f.annotations.filter { it.name == GRAPHQL_ARGUMENT }.forEach { argument ->
-                val graphQlType = argument.parameters.firstOrNull { it.name == "type" }?.value as? Annotation.Value.Single
-                graphQlType?.let { out += GRAPHQL_NAME.findAll(it.value).map { m -> m.value } }
-            }
-        }
+        type.shape.fieldEntries().forEach { f -> out += customNamesIn(f.reference).toList() }
         type.extends.forEach { ref -> out += customNamesIn(ref).toList() }
         return out
     }
-
-    private const val GRAPHQL_ARGUMENT = "GraphQLArgument"
-    private val GRAPHQL_NAME = Regex("[_A-Za-z][_0-9A-Za-z]*")
 
     /** The fields of [Shape]; the extractor never spreads parts, so there are no other entries. */
     private fun Shape.fieldEntries(): List<Field> = value.filterIsInstance<Field>()

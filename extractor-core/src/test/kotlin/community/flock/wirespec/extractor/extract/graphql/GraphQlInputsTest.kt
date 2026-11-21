@@ -26,11 +26,10 @@ class GraphQlInputsTest {
         val inputs = GraphQlInputs.of(objects, listOf(rpc(listOf(ref("NewTodo")), ref("Todo"))), emptyList())
 
         inputs.inputOnly shouldBe setOf("NewTodo", "Details")
-        inputs.inputNames shouldBe mapOf("NewTodo" to "NewTodo", "Details" to "Details")
     }
 
     @Test
-    fun `a type that is also returned is an object type with an Input copy`() {
+    fun `a type that is also returned is not marked, so the converter writes an Input copy`() {
         val rpcs = listOf(
             rpc(listOf(WireType.ListOf(ref("Owner"))), ref("Todo")),
         )
@@ -38,17 +37,32 @@ class GraphQlInputsTest {
 
         // Owner is a field of the returned Todo, so it is an output as well.
         inputs.inputOnly shouldBe emptySet()
-        inputs.inputNames shouldBe mapOf("Owner" to "OwnerInput")
     }
 
     @Test
-    fun `field resolver arguments are inputs and their results outputs`() {
-        val fields = listOf(
-            GraphQlField("Todo", "related", listOf(WireType.Field("filter", ref("Filter", nullable = true))), WireType.ListOf(ref("Todo"))),
+    fun `arguments of a field of a type are inputs and its result an output`() {
+        val related = Rpc(
+            ownerSimpleName = "Controller",
+            field = "related",
+            kind = Rpc.Kind.QUERY,
+            arguments = listOf(WireType.Field("filter", ref("Filter", nullable = true))),
+            result = WireType.ListOf(ref("Todo")),
+            parentTypeName = "Todo",
+            ofDataType = true,
         )
-        val inputs = GraphQlInputs.of(objects, emptyList(), fields)
+        val inputs = GraphQlInputs.of(objects, listOf(related), emptyList())
 
         inputs.inputOnly shouldBe setOf("Filter")
+    }
+
+    @Test
+    fun `results of field resolvers without arguments are outputs`() {
+        val owner = mapOf("Owner" to listOf(WireType.Primitive(WireType.Primitive.Kind.STRING)))
+        val rpcs = listOf(rpc(listOf(ref("Owner")), null))
+        val fields = listOf(GraphQlField("Todo", "owner", ref("Owner")))
+
+        GraphQlInputs.of(owner, rpcs, fields).inputOnly shouldBe emptySet()
+        GraphQlInputs.of(owner, rpcs, emptyList()).inputOnly shouldBe setOf("Owner")
     }
 
     @Test

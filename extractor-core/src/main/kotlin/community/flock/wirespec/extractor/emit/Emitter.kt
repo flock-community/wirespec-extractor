@@ -2,6 +2,7 @@
 package community.flock.wirespec.extractor.emit
 
 import arrow.core.NonEmptyList
+import arrow.core.nonEmptyListOf
 import arrow.core.toNonEmptyListOrNull
 import community.flock.wirespec.compiler.core.FileUri
 import community.flock.wirespec.compiler.core.parse.ast.Annotation
@@ -36,7 +37,8 @@ class Emitter {
      *
      * - Deletes existing `*.ws` files in [outputDir] recursively.
      * - Writes one `<ControllerName>.ws` per entry of [controllerDefinitions]
-     *   (each entry's `List<Definition>` may contain endpoints **and** owned types).
+     *   (each entry's `List<Definition>` may contain endpoints **and** owned types), headed
+     *   by the `@file:` annotations [fileAnnotations] holds for that controller.
      * - Writes one `types.ws` containing every definition in [sharedTypes].
      * - Never touches non-`.ws` files; never writes outside [outputDir].
      */
@@ -44,13 +46,14 @@ class Emitter {
         outputDir: File,
         controllerDefinitions: Map<String, List<Definition>>,
         sharedTypes: List<Definition>,
+        fileAnnotations: Map<String, List<Annotation>> = emptyMap(),
     ): List<File> {
         outputDir.mkdirs()
         clearExistingWs(outputDir)
 
         val written = mutableListOf<File>()
 
-        val (unitControllers, unitShared) = replaceEmptyTypesWithUnit(controllerDefinitions, sharedTypes)
+        val (unitControllers, unitShared) = replaceEmptyTypesWithUnit(controllerDefinitions, sharedTypes, fileAnnotations.values.flatten())
         val (dedupedControllers, dedupedShared) = deduplicateNames(unitControllers, unitShared)
 
         // File names are claimed case-insensitively: on macOS/Windows `Keyword.ws` and
@@ -62,14 +65,14 @@ class Emitter {
             defs.toNonEmptyListOrNull()?.let { nel ->
                 val fileName = uniqueFileName(controller, usedFileNames)
                 val path = File(outputDir, "$fileName.ws")
-                path.writeText(render(nel, "$fileName.ws"))
+                path.writeText(render(nel, "$fileName.ws", fileAnnotations[controller].orEmpty()))
                 written += path
             }
         }
 
         dedupedShared.toNonEmptyListOrNull()?.let { nel ->
             val path = File(outputDir, "types.ws")
-            path.writeText(render(nel, "types.ws"))
+            path.writeText(render(nel, "types.ws", emptyList()))
             written += path
         }
 
@@ -87,12 +90,10 @@ class Emitter {
         return "$base$i"
     }
 
-    private fun render(defs: NonEmptyList<Definition>, fileName: String): String {
+    private fun render(defs: NonEmptyList<Definition>, fileName: String, annotations: List<Annotation>): String {
         val ast = Root(
-            modules = NonEmptyList(
-                head = Module(fileUri = FileUri(fileName), statements = defs),
-                tail = emptyList(),
-            )
+            modules = nonEmptyListOf(Module(fileUri = FileUri(fileName), statements = defs, annotations = annotations)),
+            annotations = emptyList(),
         )
         return emitter.emit(ast, logger).head.result
     }
@@ -112,22 +113,26 @@ class Emitter {
      * which also guarantees no dangling reference is left pointing at a
      * definition we removed.
      *
+     * A GraphQL type that holds data (`type Book {}`) is kept although it is empty: its
+     * fields with arguments are the rpcs that name it (`@GraphQLQuery("Book")`), and without
+     * the type Wirespec's GraphQL converter would read them as operations of a root type. An
+     * operation namespace a `@file:` annotation of [fileAnnotations] nests is no definition
+     * at all, so an empty type of that name goes like any other.
+     *
      * Runs before [deduplicateNames] so the freed type names are reflected in
      * the collision counts.
      */
     private fun replaceEmptyTypesWithUnit(
         controllerDefinitions: Map<String, List<Definition>>,
         sharedTypes: List<Definition>,
+        fileAnnotations: List<Annotation>,
     ): Pair<Map<String, List<Definition>>, List<Definition>> {
         val allDefinitions = controllerDefinitions.values.flatten() + sharedTypes
-        // A GraphQL namespace (`type LibraryQuery {}`) is empty by design: its fields are the
-        // rpcs annotated with it, and the schema needs the type to reach them from the root.
         val graphQlParents = allDefinitions.filterIsInstance<Rpc>()
             .flatMap { it.annotations }
-            .filter { it.name.startsWith("GraphQL") }
-            .flatMap { it.parameters }
-            .mapNotNull { ((it.value as? Annotation.Value.Single)?.value) }
-            .toSet()
+            .filter { it.name in GRAPHQL_OPERATIONS }
+            .mapNotNull { it.single("default") }
+            .toSet() - fileAnnotations.flatMap { it.nestedTypeNames() }.toSet()
         val emptyTypeNames = allDefinitions
             .filterIsInstance<Type>()
             .filter { it.shape.value.isEmpty() && it.extends.isEmpty() && it.identifier.value !in graphQlParents }
@@ -245,4 +250,17 @@ class Emitter {
 
     /** Endpoints, channels, and RPCs: the renameable leaves of the reference graph. */
     private fun Definition.isOperation(): Boolean = this is Endpoint || this is Channel || this is Rpc
+
+    private fun Annotation.single(parameter: String): String? =
+        (parameters.firstOrNull { it.name == parameter }?.value as? Annotation.Value.Single)?.value
+
+    /** The types the fields of a `path: { library: "LibraryQuery!" }` lead to: objects, so no list. */
+    private fun Annotation.nestedTypeNames(): List<String> =
+        (parameters.firstOrNull { it.name == "path" }?.value as? Annotation.Value.Dict)?.value
+            ?.mapNotNull { (it.value as? Annotation.Value.Single)?.value?.removeSuffix("!") }
+            .orEmpty()
+
+    private companion object {
+        val GRAPHQL_OPERATIONS = setOf("GraphQLQuery", "GraphQLMutation", "GraphQLSubscription")
+    }
 }

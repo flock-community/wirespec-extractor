@@ -13,6 +13,7 @@ import community.flock.wirespec.extractor.model.Channel
 import community.flock.wirespec.extractor.model.Endpoint
 import community.flock.wirespec.extractor.model.Endpoint.HttpMethod
 import community.flock.wirespec.extractor.model.Endpoint.PathSegment
+import community.flock.wirespec.extractor.model.GraphQlNesting
 import community.flock.wirespec.extractor.model.Param
 import community.flock.wirespec.extractor.model.Rpc
 import community.flock.wirespec.extractor.model.WireType
@@ -662,6 +663,49 @@ class EmitterTest {
             override val logger = noLogger
         }
         ctx.parse(nonEmptyListOf(ModuleContent(FileUri("BookController.ws"), out))).isRight() shouldBe true
+    }
+
+    @Test
+    fun `file annotations nest GraphQL namespaces in the header of their controller's file`(@TempDir dir: Path) {
+        val catalog = builder.toRpc(Rpc("LibraryController", "catalog", Rpc.Kind.QUERY, emptyList(), WireType.Primitive(WireType.Primitive.Kind.INTEGER_32), parentTypeName = "ArchiveQuery"))
+        val path = listOf(
+            GraphQlNesting(Rpc.Kind.QUERY, "Query", "library", "LibraryQuery", nullable = false),
+            GraphQlNesting(Rpc.Kind.QUERY, "LibraryQuery", "archive", "ArchiveQuery", nullable = true),
+            GraphQlNesting(Rpc.Kind.QUERY, "Query", "settings", "SettingsQuery", nullable = false),
+        )
+        // An empty type named like a namespace: the header nests it, so it is no definition.
+        val namespaceType = builder.toDefinition(WireType.Object(name = "ArchiveQuery", fields = emptyList()))
+
+        emitter.write(
+            outputDir = dir.toFile(),
+            controllerDefinitions = mapOf("LibraryController" to listOf(catalog, namespaceType)),
+            sharedTypes = emptyList(),
+            fileAnnotations = mapOf("LibraryController" to builder.toFileAnnotations(path)),
+        )
+        val out = File(dir.toFile(), "LibraryController.ws").readText()
+
+        out shouldBe """
+            |@file:GraphQLQuery("Query", path: { library: "LibraryQuery!", settings: "SettingsQuery!" })
+            |@file:GraphQLQuery("LibraryQuery", path: { archive: "ArchiveQuery" })
+            |
+            |@GraphQLQuery("ArchiveQuery")
+            |@GraphQLName("catalog")
+            |rpc Catalog {} -> Integer32
+            |
+        """.trimMargin()
+        object : ParseContext {
+            override val logger = noLogger
+        }.parse(nonEmptyListOf(ModuleContent(FileUri("LibraryController.ws"), out))).isRight() shouldBe true
+    }
+
+    @Test
+    fun `an empty GraphQL type that rpcs are fields of is kept`(@TempDir dir: Path) {
+        val reviews = builder.toRpc(Rpc("ReviewController", "reviews", Rpc.Kind.QUERY, emptyList(), WireType.Primitive(WireType.Primitive.Kind.INTEGER_32), parentTypeName = "Book", ofDataType = true, name = "BookReviews"))
+        val book = builder.toGraphQlType("Book", emptyList())
+
+        emitter.write(dir.toFile(), mapOf("ReviewController" to listOf(reviews, book)), emptyList())
+
+        File(dir.toFile(), "ReviewController.ws").readText() shouldContain "@GraphQLQuery(\"Book\")\n@GraphQLName(\"reviews\")\nrpc BookReviews {} -> Integer32\n\ntype Book {\n\n}"
     }
 
     @Test

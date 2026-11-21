@@ -6,9 +6,12 @@ import community.flock.wirespec.compiler.core.ModuleContent
 import community.flock.wirespec.compiler.core.ParseContext
 import community.flock.wirespec.compiler.core.parse
 import community.flock.wirespec.compiler.utils.noLogger
+import community.flock.wirespec.compiler.core.parse.ast.Rpc
 import community.flock.wirespec.converter.graphql.GraphQLEmitter
+import community.flock.wirespec.converter.graphql.GraphQLOperations
 import community.flock.wirespec.extractor.fixtures.graphql.BookController
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
+import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
@@ -33,9 +36,10 @@ class GraphQlExtractionTest {
     @Test
     fun `emits GraphQL operations as rpc definitions per controller`(@TempDir tmp: Path) {
         val files = extract(tmp)
+        // LibraryNamespaceController only opens a namespace, which is no rpc: it has no file.
         files.map { it.name } shouldContainExactlyInAnyOrder listOf(
             "BookController.ws", "LibraryAdminController.ws", "MixedLibraryController.ws",
-            "LibraryNamespaceController.ws", "LibraryNamespaceFieldsController.ws", "ReviewController.ws",
+            "LibraryNamespaceFieldsController.ws", "ReviewController.ws",
         )
 
         val ws = files.single { it.name == "BookController.ws" }.readText()
@@ -70,13 +74,11 @@ class GraphQlExtractionTest {
         files.single { it.name == "LibraryAdminController.ws" }.readText() shouldContain
             "@GraphQLMutation\n@GraphQLName(\"resetLibrary\")\nrpc ResetLibrary {} -> Boolean"
 
-        files.single { it.name == "LibraryNamespaceController.ws" }.readText().let { namespace ->
-            namespace shouldContain "@GraphQLQuery\n@GraphQLName(\"library\")\nrpc Library {} -> LibraryQuery"
-            namespace shouldContain "rpc Library {} -> LibraryQuery\n\ntype LibraryQuery {\n\n}"
-        }
-
         files.single { it.name == "LibraryNamespaceFieldsController.ws" }.readText().let { namespace ->
+            // The field that opens the namespace is in the file header, and the namespace has no type.
             namespace shouldContain """
+                |@file:GraphQLQuery("Query", path: { library: "LibraryQuery!" })
+                |
                 |@GraphQLQuery("LibraryQuery")
                 |@GraphQLName("catalog")
                 |rpc Catalog {
@@ -84,6 +86,7 @@ class GraphQlExtractionTest {
                 |} -> LibraryBook[]
             """.trimMargin()
             namespace shouldNotContain "type LibraryQuery"
+            namespace shouldNotContain "rpc Library "
         }
 
         // The annotated output parses back with Wirespec.
@@ -110,21 +113,30 @@ class GraphQlExtractionTest {
         books shouldNotContain "@GraphQLInput\ntype Book {"
         // Taken and returned: left unmarked, so the converter writes it twice.
         reviews shouldContain "\ntype Shelf {"
-        reviews shouldNotContain "@GraphQLInput"
+        reviews shouldNotContain "@GraphQLInput\ntype Shelf {"
+        // Only taken, by a field with arguments.
+        reviews shouldContain "@GraphQLInput\ntype ReviewFilter {"
     }
 
     @Test
-    fun `field resolver arguments carry GraphQL types as the GraphQL converter reads them`(@TempDir tmp: Path) {
-        val books = extract(tmp).single { it.name == "BookController.ws" }.readText()
+    fun `a field resolver with arguments is an rpc that names its type`(@TempDir tmp: Path) {
+        val files = extract(tmp)
+        val reviews = files.single { it.name == "ReviewController.ws" }.readText()
 
-        books shouldContain """
-            |  @GraphQLArgument(name: "first", type: "Int!")
-            |  @GraphQLArgument(name: "filter", type: "ReviewFilter")
-            |  @GraphQLArgument(name: "shelf", type: "ShelfInput")
-            |  reviews: Review[]
+        reviews shouldContain """
+            |@GraphQLQuery("Book")
+            |@GraphQLName("reviews")
+            |rpc BookReviews {
+            |  first: Integer,
+            |  filter: ReviewFilter?,
+            |  shelf: Shelf?
+            |} -> Review[]
         """.trimMargin()
-        // The argument's input type lives next to the type that takes it.
-        books shouldContain "@GraphQLInput\ntype ReviewFilter {"
+        // The argument's input type lives with the rpc that takes it.
+        reviews shouldContain "@GraphQLInput\ntype ReviewFilter {"
+        // The type keeps its fields without arguments.
+        files.single { it.name == "BookController.ws" }.readText() shouldContain
+            "type Book {\n  id: String,\n  title: String,\n  genre: Genre,\n  author: Author\n}"
     }
 
     @Test
@@ -142,8 +154,23 @@ class GraphQlExtractionTest {
         schema shouldContain "type Shelf {"
         schema shouldContain "input ShelfInput {"
         schema shouldContain "  moveShelf(\n    shelf: ShelfInput!\n  ): Boolean!"
-        // A field resolver with its arguments.
-        schema shouldContain "  reviews(\n    first: Int!\n    filter: ReviewFilter\n    shelf: ShelfInput\n  ): [Review!]!"
+        // A field resolver with its arguments, after the fields of its type.
+        schema shouldContain "  author: Author!\n  reviews(\n    first: Int!\n    filter: ReviewFilter\n    shelf: ShelfInput\n  ): [Review!]!\n}"
+        // A namespace, nested in the root type by the field the file header names.
+        schema shouldContain "  library: LibraryQuery!\n}"
+        schema shouldContain "type LibraryQuery {\n  catalog(\n    genre: String\n  ): [LibraryBook!]!\n}"
+    }
+
+    @Test
+    fun `the GraphQL client queries a namespace through the field that leads to it`(@TempDir tmp: Path) {
+        val ast = parse(extract(tmp)).getOrNull()!!
+        val operations = GraphQLOperations(ast)
+        fun rpc(name: String) = ast.modules.flatMap { it.statements }.filterIsInstance<Rpc>().single { it.identifier.value == name }
+
+        operations.document(rpc("Catalog"), "result") shouldBe
+            "query Catalog(\$genre: String) { library { result: catalog(genre: \$genre) { title } } }"
+        // A field of a type that holds data is no operation of its own.
+        operations.document(rpc("BookReviews"), "result").shouldBeNull()
     }
 
     private fun parse(files: List<File>) = object : ParseContext {

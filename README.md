@@ -846,10 +846,37 @@ rpc BookAdded {} -> Book
   or as a class-level default) is `Query`, `Mutation`, or `Subscription`.
 - **Operation namespaces** whose type names end in `Query`, `Mutation`, or
   `Subscription` are also emitted as RPCs. For example, fields mapped to
-  `NotificationsQuery` carry `@GraphQLQuery("NotificationsQuery")`.
-- **Object fields** come from other `@SchemaMapping` methods on non-root types.
-  Their `@Argument` parameters are retained as `@GraphQLArgument(name: …, type: …)`
-  metadata, the type written in GraphQL syntax (`Int!`, `[String]`, `ReviewFilter`).
+  `LibraryQuery` carry `@GraphQLQuery("LibraryQuery")`. The root field that only
+  opens the namespace — no arguments, and a result without fields, such as
+  `@QueryMapping fun library() = Namespace` — is no RPC of its own: the header of
+  every file with an RPC of the namespace names it, and the namespace has no type.
+  The field is matched to the namespace named after it (`library` on `Query` opens
+  `LibraryQuery`) or the one its result is named after, and a namespace can nest
+  another:
+
+  ```wirespec
+  @file:GraphQLQuery("Query", path: { library: "LibraryQuery!" })
+
+  @GraphQLQuery("LibraryQuery")
+  @GraphQLName("catalog")
+  rpc Catalog {
+    genre: String?
+  } -> LibraryBook[]
+  ```
+- **Object fields** come from other `@SchemaMapping` methods on non-root types. A
+  field without `@Argument`s is a field of its type. A field with arguments is a
+  function, and so an RPC that names its type — `@SchemaMapping(typeName = "Book")
+  fun reviews(book: Book, @Argument first: Int)` becomes:
+
+  ```wirespec
+  @GraphQLQuery("Book")
+  @GraphQLName("reviews")
+  rpc BookReviews {
+    first: Integer32
+  } -> Review[]
+  ```
+
+  The type is emitted, empty if need be, so the RPC reads back as its field.
 - **Input objects** are told apart the way Wirespec's GraphQL converter does: a type
   an argument reaches, directly or through its fields, is an input. One that is only
   ever taken is marked `@GraphQLInput`; one that is also returned stays a plain
@@ -860,7 +887,8 @@ rpc BookAdded {} -> Book
 - **Names** are the GraphQL field name (the annotation's `name` / `field`, else
   the method name), PascalCased: `bookById` → `BookById`. When that name is
   taken — by a type, as `type Book` takes it for a field `book`, or by an earlier
-  rpc — the root type becomes a prefix (`QueryBook`). `@GraphQLName("book")`
+  rpc — the root type becomes a prefix (`QueryBook`). A field with arguments of an
+  object type is always prefixed with its type (`BookReviews`). `@GraphQLName("book")`
   is always written, so the original field name is never lost.
 - **Arguments** come from `@Argument` parameters (name from the annotation, else
   the parameter name). An `ArgumentValue<T>` argument becomes a nullable `T`. An
@@ -917,13 +945,13 @@ rpc BookAdded {} -> Book
   retyped; nullability still comes from the handler signature. Without a schema
   file on the classpath, an `ID` stays a `String`.
 
-The output converts back into a GraphQL schema with Wirespec's GraphQL converter —
-`GraphQLEmitter` in the `community.flock.wirespec.converter:graphql` library, or the
+The output converts back into a GraphQL schema with Wirespec's GraphQL converter
+(Wirespec 0.23.10 or later) — `GraphQLEmitter` in the
+`community.flock.wirespec.converter:graphql` library, or the
 [playground](https://playground.wirespec.io/?specification=wirespec&emitter=graphql).
 
 RPCs are grouped into the controller's `<Controller>.ws` file and the types they
-reference follow the usual ownership rules; a type only taken by a field argument
-lives with the type that declares the field. Spring for GraphQL is matched by
+reference follow the usual ownership rules. Spring for GraphQL is matched by
 fully-qualified name, so it needs no GraphQL API on the extractor's classpath and
 cleanly no-ops on projects that don't use it. Toggle it with `extractGraphQl`
 (default `true`).
